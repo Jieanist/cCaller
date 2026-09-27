@@ -1,10 +1,10 @@
 //! Command-line front end for the cCaller test framework.
 //!
-//! M1 surface: argument parsing (`--version`, `--help`, `-l/--log`,
-//! `-t/--test`, `-i/--lib`) plus the `check` subcommand (FR-X-03) with
-//! text and JSON output. `run` and the remaining subcommands land with
-//! milestone M2+; until then a bare invocation prints the help text and
-//! exits successfully.
+//! The surface is argument parsing (`--version`, `--help`, `-l/--log`,
+//! `-t/--test`, `-i/--lib`) plus two subcommands: `check` (FR-X-03) with
+//! text and JSON output, and `run` (FR-X-01) which executes a
+//! configuration end to end and is the default when no subcommand is
+//! given.
 
 // The `__F_xx_nn` test-name suffixes mandated by verification plan
 // section 9.1 are intentionally upper-case; exempt test builds only.
@@ -26,7 +26,8 @@ use std::path::{Path, PathBuf};
 
 use ccaller_core::config::{run_check, CheckReport};
 use ccaller_core::error::CoreError;
-use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
+use ccaller_core::{ConsoleReporter, RunError};
+use clap::{Parser, Subcommand, ValueEnum};
 
 /// Generic C-interface test execution framework.
 #[derive(Parser)]
@@ -50,9 +51,15 @@ struct Cli {
     command: Option<Sub>,
 }
 
-/// The subcommands of ccaller (FR-X-01); `run` lands in M2.
+/// The subcommands of ccaller (FR-X-01); `run` is the default.
 #[derive(Subcommand)]
 enum Sub {
+    /// Execute the configuration end to end (the default subcommand).
+    Run {
+        /// Allow a run that executes zero cases to exit 0 (decision Q-08).
+        #[arg(long)]
+        allow_empty: bool,
+    },
     /// Load-time validation and static slot analysis; nothing is executed.
     Check {
         /// Output format (requirement spec 7.6).
@@ -91,16 +98,9 @@ fn main() -> std::process::ExitCode {
         None => None,
     };
     logging::init(cli_level);
-    match cli.command {
-        Some(Sub::Check { format }) => check(cli.test.as_deref(), cli.lib.as_deref(), format),
-        None => {
-            // The run subcommand lands in M2; until then a bare
-            // invocation shows the help.
-            if let Err(error) = Cli::command().print_help() {
-                log::warn!("failed to print help: {error}");
-            }
-            std::process::ExitCode::SUCCESS
-        }
+    match cli.command.unwrap_or(Sub::Run { allow_empty: false }) {
+        Sub::Run { allow_empty } => run(cli.test.as_deref(), cli.lib.as_deref(), allow_empty),
+        Sub::Check { format } => check(cli.test.as_deref(), cli.lib.as_deref(), format),
     }
 }
 
@@ -138,6 +138,77 @@ fn check(test: Option<&Path>, lib: Option<&Path>, format: Format) -> std::proces
             eprintln!("error: {error}");
             std::process::ExitCode::from(exit_code::ExitCode::InternalError as u8)
         }
+    }
+}
+
+/// Runs the `run` subcommand (FR-X-01, the default).
+///
+/// Load-time findings reuse the `check` gate (exit 2); library-load
+/// failures are environment errors (exit 2); executed cases map to 0 when
+/// nothing failed and 1 otherwise. A run that executes zero cases exits
+/// 1 unless `--allow-empty` is given (Q-08).
+fn run(test: Option<&Path>, lib: Option<&Path>, allow_empty: bool) -> std::process::ExitCode {
+    let (Some(test), Some(lib)) = (test, lib) else {
+        eprintln!("error: `run` requires both --test and --lib");
+        return std::process::ExitCode::from(exit_code::ExitCode::ConfigError as u8);
+    };
+    let reporter = ConsoleReporter::new(std::io::stdout());
+    match ccaller_core::execute(lib, test, Box::new(reporter)) {
+        Ok(report) => {
+            let code = if report.summary.total == 0 {
+                if allow_empty {
+                    exit_code::ExitCode::Success
+                } else {
+                    exit_code::ExitCode::TestFailed
+                }
+            } else if report.summary.failure == 0 {
+                exit_code::ExitCode::Success
+            } else {
+                exit_code::ExitCode::TestFailed
+            };
+            std::process::ExitCode::from(code as u8)
+        }
+        Err(RunError::Io { path, source }) => {
+            eprintln!("error: failed to read `{path}`: {source}");
+            std::process::ExitCode::from(exit_code::ExitCode::ConfigError as u8)
+        }
+        Err(RunError::Config(diagnostics)) => {
+            print_config_findings(&diagnostics);
+            std::process::ExitCode::from(exit_code::ExitCode::ConfigError as u8)
+        }
+        Err(RunError::Load(error)) => {
+            eprintln!("error: {error}");
+            std::process::ExitCode::from(exit_code::ExitCode::ConfigError as u8)
+        }
+        Err(RunError::Internal(message)) => {
+            eprintln!("error: internal framework error: {message}");
+            std::process::ExitCode::from(exit_code::ExitCode::InternalError as u8)
+        }
+        Err(RunError::Report(error)) => {
+            eprintln!("error: failed to write the run report: {error}");
+            std::process::ExitCode::from(exit_code::ExitCode::ConfigError as u8)
+        }
+        // RunError is non_exhaustive: an unknown variant is a framework
+        // defect, mapped to the internal-error exit code.
+        Err(other) => {
+            eprintln!("error: internal framework error: {other}");
+            std::process::ExitCode::from(exit_code::ExitCode::InternalError as u8)
+        }
+    }
+}
+
+/// Prints load-time findings to stderr (run has no result to report, so
+/// the diagnostics are errors, not check's stdout findings).
+fn print_config_findings(diagnostics: &[ccaller_core::config::Diagnostic]) {
+    for diagnostic in diagnostics {
+        eprintln!(
+            "{}:{}:{}: error[{}]: {}",
+            diagnostic.location.file,
+            diagnostic.location.line,
+            diagnostic.location.column,
+            diagnostic.code,
+            diagnostic.message
+        );
     }
 }
 
