@@ -1,0 +1,11 @@
+[package]
+name = "ccaller-core"
+description = "Domain models, validation, scheduling, assertions, and reporting abstractions for cCaller"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
