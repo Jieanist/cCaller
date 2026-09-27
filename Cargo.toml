@@ -44,5 +44,6 @@ env_logger = "0.11"
 # dlopen/dlsym handling stays inside the ffi crate (AR-04).
 libloading = "0.8"
 # Workspace member crates, referenced by path so the graph stays inside
-# the workspace (cli -> core, per AR-02 layering).
+# the workspace (cli -> core -> ffi, per AR-01 layering).
 ccaller-core = { path = "crates/core" }
+ccaller-ffi = { path = "crates/ffi" }

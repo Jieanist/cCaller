@@ -82,6 +82,7 @@ dependencies = [
 name = "ccaller-core"
 version = "0.1.0"
 dependencies = [
+ "ccaller-ffi",
  "serde",
  "serde_json",
  "thiserror",

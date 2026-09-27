@@ -40,7 +40,10 @@ use super::source::SourceDoc;
 use super::value::{parse_value, ConcreteValue, ScalarRaw, ValueKind};
 
 /// Number of `u64` slots in one thread's `param_page` (FR-A-06).
-pub const PARAM_PAGE_SLOTS: usize = 512;
+///
+/// Re-exported from the ffi crate so the static analysis and the
+/// runtime page share one numeric truth with `ccaller.h`.
+pub use ccaller_ffi::page::PARAM_PAGE_SLOTS;
 
 /// Runs the def-use analysis over every expanded test.
 ///

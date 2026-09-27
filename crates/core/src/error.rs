@@ -52,6 +52,15 @@ pub enum CoreError {
         #[source]
         source: std::io::Error,
     },
+    /// A resolved value cannot cross the wrapper ABI (FR-A-03); a
+    /// runtime defense below the load-time grammar.
+    #[error("argument `{param}` cannot cross the ABI: {reason}")]
+    Marshal {
+        /// Name of the offending parameter.
+        param: String,
+        /// Why the value is not representable in the unified ABI.
+        reason: String,
+    },
 }
 
 #[cfg(test)]
