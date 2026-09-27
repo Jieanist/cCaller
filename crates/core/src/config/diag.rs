@@ -68,9 +68,8 @@ pub fn sniff_code(message: &str) -> &'static str {
         codes::UNKNOWN_FIELD
     } else if message.contains("missing field") {
         codes::MISSING_FIELD
-    } else if message.contains("unknown variant") {
-        codes::TYPE_MISMATCH
-    } else if message.contains("invalid type")
+    } else if message.contains("unknown variant")
+        || message.contains("invalid type")
         || message.contains("invalid value")
         || message.contains("data did not match")
     {
