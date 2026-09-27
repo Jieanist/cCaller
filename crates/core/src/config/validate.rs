@@ -295,10 +295,21 @@ fn validate_cmd(
     }
 
     let Some(func) = libs.func(opfunc) else {
+        // Verification plan 3.1 (opfunc-not-found): the message names the
+        // function and the library paths it was searched in.
+        let paths: Vec<&str> = libs
+            .libs
+            .iter()
+            .map(|lib| lib.get_ref().path.get_ref().as_str())
+            .collect();
         out.push(Diagnostic::new(
             codes::UNKNOWN_OPFUNC,
             loc,
-            format!("{scope}: unknown function `{opfunc}` (not declared in any library)"),
+            format!(
+                "{scope}: unknown function `{opfunc}` (not declared in any \
+                 of: {})",
+                paths.join(", ")
+            ),
         ));
         return out;
     };
@@ -697,7 +708,13 @@ cmds = [{ opfunc = "Call_nope", expect_eq = 0 }]
 "#,
         );
         assert_eq!(codes_of(&diags), vec!["unknown_opfunc"]);
-        assert!(diags[0].message.contains("Call_nope"));
+        // Verification plan 3.1 (opfunc-not-found): the message names the
+        // function and the library paths it was searched in.
+        assert!(
+            diags[0].message.contains("Call_nope") && diags[0].message.contains("libfake.so"),
+            "message names the function and the library path: {}",
+            diags[0].message
+        );
     }
 
     #[test]
