@@ -20,3 +20,7 @@ all = { level = "deny", priority = -1 }
 unwrap_used = "warn"
 expect_used = "warn"
 panic = "warn"
+
+[workspace.dependencies]
+# Style guide section 6.1 mandates thiserror for per-crate error types.
+thiserror = "2"
