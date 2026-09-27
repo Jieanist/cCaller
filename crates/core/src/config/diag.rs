@@ -68,6 +68,13 @@ pub mod codes {
     pub const INVALID_VALUE: &str = "invalid_value";
     /// An input group expands beyond the combination limit.
     pub const TOO_MANY_COMBINATIONS: &str = "too_many_combinations";
+    /// A slot is read (or `read_write`) before any command wrote it
+    /// (FR-C-10).
+    pub const SLOT_READ_BEFORE_WRITE: &str = "slot_read_before_write";
+    /// A slot index falls outside `[0, 512)` (FR-C-10).
+    pub const SLOT_OUT_OF_RANGE: &str = "slot_out_of_range";
+    /// A slot-role parameter received a non-integer value (FR-C-10).
+    pub const SLOT_NOT_INTEGER: &str = "slot_not_integer";
 }
 
 /// One load-time finding as reported by `ccaller check`.
