@@ -1,0 +1,12 @@
+# Broken wrapper fixture for the loader tests: exports `Call_add`
+# but NOT the required handshake symbol `CCaller_abi_version`.
+[package]
+name = "nover_wrapper"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]

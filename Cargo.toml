@@ -40,6 +40,9 @@ serde_json = "1"
 clap = { version = "4", features = ["derive"] }
 log = "0.4"
 env_logger = "0.11"
+# libloading: the dynamic-library loader named by FR-A-02; all
+# dlopen/dlsym handling stays inside the ffi crate (AR-04).
+libloading = "0.8"
 # Workspace member crates, referenced by path so the graph stays inside
 # the workspace (cli -> core, per AR-02 layering).
 ccaller-core = { path = "crates/core" }

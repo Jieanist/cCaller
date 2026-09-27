@@ -1,0 +1,14 @@
+# Well-formed wrapper fixture for the loader tests: exports the
+# handshake symbol with the expected version plus `Call_add` and
+# `Call_dup`. Not a member of the root workspace (empty [workspace]
+# table) so workspace builds never pick it up.
+[package]
+name = "ok_wrapper"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]

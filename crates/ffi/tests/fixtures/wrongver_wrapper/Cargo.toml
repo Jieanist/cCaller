@@ -1,0 +1,12 @@
+# Broken wrapper fixture for the loader tests: exports the handshake
+# symbol but reports an ABI version the framework does not expect.
+[package]
+name = "wrongver_wrapper"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]

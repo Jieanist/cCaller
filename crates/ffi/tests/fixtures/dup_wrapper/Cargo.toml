@@ -1,0 +1,12 @@
+# Partner fixture for duplicate-detection tests: exports the same
+# `Call_dup` symbol as `ok_wrapper`, with a correct handshake.
+[package]
+name = "dup_wrapper"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
