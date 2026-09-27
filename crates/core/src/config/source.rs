@@ -169,4 +169,13 @@ mod tests {
         let err = doc.parse::<Mini>().unwrap_err();
         assert_eq!(err.code, "schema");
     }
+
+    #[test]
+    fn parse_returns_the_deserialized_value__F_C_09() {
+        let doc = SourceDoc {
+            path: "m.toml".to_string(),
+            text: "a = 5\n".to_string(),
+        };
+        assert_eq!(doc.parse::<Mini>().unwrap().a, 5);
+    }
 }
