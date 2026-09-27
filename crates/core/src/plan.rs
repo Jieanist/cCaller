@@ -44,6 +44,9 @@ pub struct Plan {
     pub case_envs: Vec<CaseEnvPlan>,
     /// Tests in declaration order, each with its expanded sub-cases.
     pub tests: Vec<TestPlan>,
+    /// Default `serial` value for tests that do not declare one
+    /// (requirement spec 7.3, FR-T-09).
+    pub default_serial: bool,
 }
 
 /// One name-less env layer's resolved init and exit commands.
@@ -79,6 +82,25 @@ pub struct TestPlan {
     pub case_env: Option<usize>,
     /// The test's concrete sub-cases.
     pub subcases: Vec<SubCase>,
+    /// The test's declared `serial`, if any; `None` inherits the CLI flag
+    /// or [`Plan::default_serial`] (FR-T-09/T-10).
+    pub serial: Option<bool>,
+    /// Whether this is a death test (FR-T-05).
+    pub should_panic: bool,
+}
+
+/// Computes the effective serial flag for one test (FR-T-09/T-10).
+///
+/// Precedence, highest first: the test's own `serial`, then the CLI
+/// `--serial`, then the configuration's `default_serial`. Execution is
+/// serial in this milestone regardless, but the resolved value is what
+/// parallel scheduling will honour later and is logged for observability.
+pub(crate) fn effective_serial(
+    test_serial: Option<bool>,
+    cli_serial: bool,
+    default_serial: bool,
+) -> bool {
+    test_serial.unwrap_or(if cli_serial { true } else { default_serial })
 }
 
 /// The result of [`build_plan`]: a ready plan or the load-time findings.
@@ -188,6 +210,8 @@ fn assemble(
                 break_if_fail: test.break_if_fail,
                 case_env,
                 subcases: subcases.clone(),
+                serial: test.serial,
+                should_panic: test.should_panic,
             }
         })
         .collect();
@@ -199,6 +223,7 @@ fn assemble(
         thread_env,
         case_envs,
         tests,
+        default_serial: cases.default_serial,
     })
 }
 
@@ -421,7 +446,7 @@ mod tests {
     }
 
     #[test]
-    fn env_layer_order_is_global_process_case_thread__F_E_02() {
+    fn env_layers_assemble_with_case_binding__F_E_02() {
         let cases = "version = 1\n\
                      [env]\ninit = [{ opfunc = \"Call_ping\" }]\n\
                      [process_env]\ninit = [{ opfunc = \"Call_ping\" }]\n\
@@ -473,5 +498,17 @@ mod tests {
             panic!("expected an invalid plan");
         };
         assert!(diags.iter().any(|d| d.code == codes::UNKNOWN_OPFUNC));
+    }
+
+    #[test]
+    fn serial_precedence_test_then_cli_then_default__F_T_09() {
+        // A test's own `serial` wins over the CLI flag; the CLI flag wins
+        // over `default_serial` (FR-T-09/T-10).
+        assert!(effective_serial(Some(true), false, false));
+        assert!(!effective_serial(Some(false), true, true));
+        assert!(effective_serial(None, true, false));
+        assert!(effective_serial(None, true, true));
+        assert!(!effective_serial(None, false, false));
+        assert!(effective_serial(None, false, true));
     }
 }

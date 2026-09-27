@@ -73,3 +73,13 @@ fn run_subcommand_exposes_help__F_X_01() {
     assert!(stdout.contains("Usage:"), "stdout was: {stdout}");
     assert!(stdout.contains("run"), "stdout was: {stdout}");
 }
+
+#[test]
+fn run_help_lists_serial_flag__F_T_09() {
+    // The `--serial` override (FR-T-09) is part of the run surface, so
+    // the plumbing is observable through the generated help.
+    let output = ccaller().arg("run").arg("--help").output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("--serial"), "stdout was: {stdout}");
+}

@@ -30,4 +30,4 @@ pub mod runtime;
 pub use error::{CoreError, Location};
 pub use plan::{build_plan, Plan, PlanOutcome};
 pub use report::{ConsoleReporter, FailedCase, Reporter, RunReport, RunSummary};
-pub use run::{execute, RunError, Runner};
+pub use run::{execute, RunError, RunOptions, Runner};

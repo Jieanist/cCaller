@@ -15,6 +15,10 @@ thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
+# The executor emits warn/debug diagnostics (death-test skip, serial
+# resolution) through the log facade; the CLI owns logger initialization
+# (style guide section 10.1).
+log.workspace = true
 # The executor marshals domain values into the ffi call bridge; the
 # dependency direction core -> ffi is mandated by AR-01.
 ccaller-ffi.workspace = true

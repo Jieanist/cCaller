@@ -4,12 +4,35 @@
 //!
 //! Deliberately free of raw-pointer dereferencing: that stays exclusive
 //! to `crates/ffi` (architecture rule AR-04), and the run test only needs
-//! return-code and arity plumbing, not memory access.
+//! return-code and arity plumbing, not memory access. The lifecycle and
+//! ordering tests observe call order through a safe atomic counter, so
+//! they also need no page access.
+
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// ABI version reported by this fixture; matches `CCALLER_ABI_VERSION`.
 #[no_mangle]
 pub extern "C" fn CCaller_abi_version() -> i64 {
     1
+}
+
+/// Call counter for the env lifecycle/order tests; reset by `Call_reset`.
+static TICKS: AtomicUsize = AtomicUsize::new(0);
+
+/// Resets the lifecycle counter and returns 0.
+#[no_mangle]
+pub extern "C" fn Call_reset(_page: *mut u64, _params: *const i64, _param_len: i64) -> i64 {
+    TICKS.store(0, Ordering::SeqCst);
+    0
+}
+
+/// Returns the current tick count and then increments it.
+///
+/// Combined with `Call_reset`, this lets a test assert the exact order in
+/// which env phases and test commands ran, without touching `param_page`.
+#[no_mangle]
+pub extern "C" fn Call_tick(_page: *mut u64, _params: *const i64, _param_len: i64) -> i64 {
+    TICKS.fetch_add(1, Ordering::SeqCst) as i64
 }
 
 /// Returns the number of arguments the framework passed (`param_len`),

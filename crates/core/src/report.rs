@@ -17,7 +17,9 @@ pub struct RunSummary {
     pub success: usize,
     /// Number of sub-cases with at least one failure (env or assertion).
     pub failure: usize,
-    /// Number of Cmds skipped by `CCALLER_ERR_SKIP` (decision Q-01).
+    /// Number of skips: Cmds that returned `CCALLER_ERR_SKIP` (decision
+    /// Q-01) plus sub-cases skipped because isolation is unavailable
+    /// (FR-T-05).
     pub skipped: usize,
 }
 

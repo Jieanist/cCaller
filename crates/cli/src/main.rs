@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 
 use ccaller_core::config::{run_check, CheckReport};
 use ccaller_core::error::CoreError;
-use ccaller_core::{ConsoleReporter, RunError};
+use ccaller_core::{ConsoleReporter, RunError, RunOptions};
 use clap::{Parser, Subcommand, ValueEnum};
 
 /// Generic C-interface test execution framework.
@@ -59,6 +59,9 @@ enum Sub {
         /// Allow a run that executes zero cases to exit 0 (decision Q-08).
         #[arg(long)]
         allow_empty: bool,
+        /// Force every test's sub-cases to run serially (FR-T-09).
+        #[arg(long)]
+        serial: bool,
     },
     /// Load-time validation and static slot analysis; nothing is executed.
     Check {
@@ -98,8 +101,14 @@ fn main() -> std::process::ExitCode {
         None => None,
     };
     logging::init(cli_level);
-    match cli.command.unwrap_or(Sub::Run { allow_empty: false }) {
-        Sub::Run { allow_empty } => run(cli.test.as_deref(), cli.lib.as_deref(), allow_empty),
+    match cli.command.unwrap_or(Sub::Run {
+        allow_empty: false,
+        serial: false,
+    }) {
+        Sub::Run {
+            allow_empty,
+            serial,
+        } => run(cli.test.as_deref(), cli.lib.as_deref(), allow_empty, serial),
         Sub::Check { format } => check(cli.test.as_deref(), cli.lib.as_deref(), format),
     }
 }
@@ -146,14 +155,22 @@ fn check(test: Option<&Path>, lib: Option<&Path>, format: Format) -> std::proces
 /// Load-time findings reuse the `check` gate (exit 2); library-load
 /// failures are environment errors (exit 2); executed cases map to 0 when
 /// nothing failed and 1 otherwise. A run that executes zero cases exits
-/// 1 unless `--allow-empty` is given (Q-08).
-fn run(test: Option<&Path>, lib: Option<&Path>, allow_empty: bool) -> std::process::ExitCode {
+/// 1 unless `--allow-empty` is given (Q-08). `--serial` (FR-T-09) is
+/// forwarded to the executor, where it participates in the per-test
+/// serial precedence.
+fn run(
+    test: Option<&Path>,
+    lib: Option<&Path>,
+    allow_empty: bool,
+    serial: bool,
+) -> std::process::ExitCode {
     let (Some(test), Some(lib)) = (test, lib) else {
         eprintln!("error: `run` requires both --test and --lib");
         return std::process::ExitCode::from(exit_code::ExitCode::ConfigError as u8);
     };
     let reporter = ConsoleReporter::new(std::io::stdout());
-    match ccaller_core::execute(lib, test, Box::new(reporter)) {
+    let options = RunOptions { serial };
+    match ccaller_core::execute(lib, test, options, Box::new(reporter)) {
         Ok(report) => {
             let code = if report.summary.total == 0 {
                 if allow_empty {
