@@ -227,3 +227,77 @@ fn check_missing_file_exits_two__F_X_02() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("failed to read"), "stderr was: {stderr}");
 }
+
+#[test]
+fn end_to_end_check_golden_regression__F_Q_02() {
+    // F-Q-02 anchor: the golden end-to-end regression through the M1
+    // pipeline (load -> validate -> expand -> def-use -> report). The
+    // fixture exercises env-slot pre-writing, $var bindings, range
+    // expansion, and cross-checking against the library description.
+    // The run subcommand extends the same chain in M2.
+    let lib = config("golden-libs.toml", LIBS_TOML);
+    let cases = config(
+        "golden-cases.toml",
+        r#"version = 1
+
+[env]
+init = [{ opfunc = "Call_malloc", args = ["len=64", "mem_idx=0"] }]
+
+[[tests]]
+name = "t_range"
+cmds = [
+  { opfunc = "Call_malloc", expect_eq = 0, args = ["len=8", "mem_idx=$idx"] },
+  { opfunc = "Call_read32", expect_eq = 42, args = ["addr_idx=$idx"] },
+]
+[[tests.inputs]]
+name = "ipt"
+args = { idx = { start = 1, end = 5, step = 2 } }
+
+[[tests]]
+name = "t_plain"
+cmds = [{ opfunc = "Call_read32", expect_ne = 0, args = ["addr_idx=0"] }]
+"#,
+    );
+
+    let text = ccaller()
+        .arg("-t")
+        .arg(&cases)
+        .arg("-i")
+        .arg(&lib)
+        .arg("check")
+        .output()
+        .unwrap();
+    assert!(
+        text.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&text.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&text.stdout);
+    assert!(
+        stdout.contains("ok: 2 tests, 4 subcases, 7 commands"),
+        "stdout was: {stdout}"
+    );
+
+    let json = ccaller()
+        .arg("-t")
+        .arg(&cases)
+        .arg("-i")
+        .arg(&lib)
+        .arg("check")
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(
+        json.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&json.stderr)
+    );
+    let report: Value = serde_json::from_str(&String::from_utf8_lossy(&json.stdout)).unwrap();
+    assert_eq!(report["schema"].as_u64(), Some(1));
+    assert_eq!(report["ok"].as_bool(), Some(true));
+    assert_eq!(report["errors"].as_array().map(Vec::len), Some(0));
+    assert_eq!(report["stats"]["tests"].as_u64(), Some(2));
+    assert_eq!(report["stats"]["subcases"].as_u64(), Some(4));
+    assert_eq!(report["stats"]["cmds"].as_u64(), Some(7));
+}
