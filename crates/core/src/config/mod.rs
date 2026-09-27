@@ -17,6 +17,7 @@ pub mod check;
 pub mod defuse;
 pub mod diag;
 pub mod expand;
+pub mod layers;
 pub mod lib_desc;
 pub mod source;
 pub mod validate;

@@ -35,6 +35,7 @@ use crate::error::Location;
 use super::cases::{CaseConfig, CmdDef, GlobalEnv, TestDef};
 use super::diag::{codes, Diagnostic};
 use super::expand::SubCase;
+use super::layers::{EnvScope, ENTRY_ORDER};
 use super::lib_desc::{FuncDecl, LibDescription};
 use super::source::SourceDoc;
 use super::value::{parse_value, ConcreteValue, ScalarRaw, ValueKind};
@@ -83,20 +84,32 @@ pub fn analyze_def_use(
         // exit order is the reverse.
         let mut prefix = Vec::new();
         let mut suffix = Vec::new();
-        for layer in [&process, &global].into_iter().flatten() {
-            extend_walk_items(&mut prefix, &layer.init, test_name);
-            extend_walk_items(&mut suffix, &layer.exit, test_name);
-        }
-        if let Some(env) = case_env {
-            extend_walk_items(&mut prefix, &env.init, test_name);
-            extend_walk_items(&mut suffix, &env.exit, test_name);
-        }
-        if let Some(l) = &thread {
-            extend_walk_items(&mut prefix, &l.init, test_name);
-            extend_walk_items(&mut suffix, &l.exit, test_name);
+        for scope in ENTRY_ORDER {
+            match scope {
+                EnvScope::Process => {
+                    if let Some(l) = &process {
+                        walk_scope(&mut prefix, &mut suffix, &l.init, &l.exit, test_name);
+                    }
+                }
+                EnvScope::Global => {
+                    if let Some(l) = &global {
+                        walk_scope(&mut prefix, &mut suffix, &l.init, &l.exit, test_name);
+                    }
+                }
+                EnvScope::Case => {
+                    if let Some(env) = case_env {
+                        walk_scope(&mut prefix, &mut suffix, &env.init, &env.exit, test_name);
+                    }
+                }
+                EnvScope::Thread => {
+                    if let Some(l) = &thread {
+                        walk_scope(&mut prefix, &mut suffix, &l.init, &l.exit, test_name);
+                    }
+                }
+            }
         }
         // Layer exit order is the reverse of the entry order: the loop
-        // above pushed exits global-first, so flip the whole sequence.
+        // above pushed exits in entry order, so flip the whole sequence.
         suffix.reverse();
 
         let test_cmds: Vec<(String, Location, Option<&FuncDecl>)> = test
@@ -194,6 +207,21 @@ where
             func: cmd.func,
         });
     }
+}
+
+/// Places one scope's init commands into the entry prefix and its exit
+/// commands into the (pre-reverse) exit suffix of a test's walk.
+fn walk_scope<'a, 'b>(
+    prefix: &mut Vec<WalkItem<'a>>,
+    suffix: &mut Vec<WalkItem<'a>>,
+    init: &'b [EnvCmd<'a>],
+    exit: &'b [EnvCmd<'a>],
+    test: &str,
+) where
+    'b: 'a,
+{
+    extend_walk_items(prefix, init, test);
+    extend_walk_items(suffix, exit, test);
 }
 
 /// Applies one command to the written-set, reporting slot findings.
@@ -787,6 +815,27 @@ args = { i = [1, 2] }
             "exactly one sub-case is affected: {}",
             diags[0].message
         );
+    }
+
+    #[test]
+    fn process_env_writes_are_visible_to_global_env__Q_13() {
+        // The entry order is process, global (Q-13). A read in the global
+        // env is only satisfied if the process env init ran first; were
+        // the two swapped this would report a read-before-write. This
+        // pins the def-use walk to the shared layer order.
+        let diags = findings(
+            r#"
+version = 1
+[process_env]
+init = [{ opfunc = "Call_ctx_new", args = ["out_idx=0"] }]
+[env]
+init = [{ opfunc = "Call_ctx_free", args = ["in_idx=0"] }]
+[[tests]]
+name = "t"
+cmds = [{ opfunc = "Call_mode", expect_eq = 0, args = ["mode=1"] }]
+"#,
+        );
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
     }
 
     #[test]
