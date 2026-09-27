@@ -32,6 +32,32 @@ pub mod codes {
     pub const DUPLICATE_PARAM: &str = "duplicate_param";
     /// `slot_roles` names a parameter the function does not declare.
     pub const SLOT_ROLE_UNKNOWN_PARAM: &str = "slot_role_unknown_param";
+    /// A test name is declared twice.
+    pub const DUPLICATE_TEST_NAME: &str = "duplicate_test_name";
+    /// An `envs` name is declared twice.
+    pub const DUPLICATE_ENV_NAME: &str = "duplicate_env_name";
+    /// A test is claimed by more than one non-global env.
+    pub const DUPLICATE_ENV_MEMBERSHIP: &str = "duplicate_env_membership";
+    /// `envs`/`concurrences` references a test that does not exist.
+    pub const UNKNOWN_TEST_REF: &str = "unknown_test_ref";
+    /// A test declares an empty `cmds` list.
+    pub const EMPTY_CMDS: &str = "empty_cmds";
+    /// `thread_num` is less than 1.
+    pub const INVALID_THREAD_NUM: &str = "invalid_thread_num";
+    /// A test command declares neither `expect_eq` nor `expect_ne`.
+    pub const ASSERTION_MISSING: &str = "assertion_missing";
+    /// A command declares both `expect_eq` and `expect_ne`.
+    pub const ASSERTION_CONFLICT: &str = "assertion_conflict";
+    /// `opfunc` is not declared in the library description.
+    pub const UNKNOWN_OPFUNC: &str = "unknown_opfunc";
+    /// Cmd `args` names do not match the library `paras`.
+    pub const ARGS_MISMATCH: &str = "args_mismatch";
+    /// A range violates `step > 0 && start <= end` or has a non-integer bound.
+    pub const INVALID_RANGE: &str = "invalid_range";
+    /// An input group name is declared twice within one test.
+    pub const DUPLICATE_INPUT_NAME: &str = "duplicate_input_name";
+    /// An InputGroup `refs` entry is not a `shared_inputs` key.
+    pub const UNKNOWN_SHARED_INPUT: &str = "unknown_shared_input";
 }
 
 /// One load-time finding as reported by `ccaller check`.

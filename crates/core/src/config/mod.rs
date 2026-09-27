@@ -4,14 +4,16 @@
 //! plan: [`source`] tracks file text and maps parser spans back to
 //! line/column, [`diag`] defines the load-time diagnostic currency,
 //! [`lib_desc`] models library descriptions (requirement spec 7.2),
-//! [`cases`] models test case configurations (requirement spec 7.3), and
-//! [`value`] defines the scalar grammar shared by command arguments and
-//! expectation values.
+//! [`cases`] models test case configurations (requirement spec 7.3),
+//! [`validate`] runs the cross-reference rules of FR-C-08, and [`value`]
+//! defines the scalar grammar shared by command arguments and expectation
+//! values.
 
 pub mod cases;
 pub mod diag;
 pub mod lib_desc;
 pub mod source;
+pub mod validate;
 pub mod value;
 
 pub use cases::{
@@ -24,6 +26,7 @@ pub use lib_desc::{
     SUPPORTED_VERSION,
 };
 pub use source::SourceDoc;
+pub use validate::validate_cases;
 pub use value::{
     parse_value, ConcreteValue, ParsedValue, ResolveError, ScalarRaw, ValueKind, ValueSyntaxError,
 };
