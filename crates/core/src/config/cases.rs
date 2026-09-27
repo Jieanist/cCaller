@@ -6,7 +6,10 @@
 //! [`super::validate`]; this module never rejects a well-formed document.
 
 use std::collections::BTreeMap;
+use std::fmt;
+use std::ops::Range;
 
+use serde::de::{self, Deserializer, MapAccess, Visitor};
 use serde::Deserialize;
 use toml::Spanned;
 
@@ -107,24 +110,111 @@ pub struct TestDef {
 }
 
 /// One interface call: which function, which arguments, what to expect.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
+///
+/// The `expect_*` namespace is open-ended (FR-V-02): every `expect_*` field
+/// is captured by name with its value span, and every non-`expect_` stray
+/// field is captured by name with its value span so [`super::validate`] can
+/// reject it as an unknown field (FR-C-09). Deserialization is hand-written
+/// because `deny_unknown_fields` cannot coexist with the open assertion
+/// namespace, and `#[serde(flatten)]` would drop the TOML spans the
+/// validator needs.
+#[derive(Debug, Clone)]
 pub struct CmdDef {
     /// Function name; must exist in the library description (FR-C-08).
     pub opfunc: Spanned<String>,
     /// `name=value` strings; names must match the library `paras` in name,
     /// count, and order (FR-C-08).
-    #[serde(default)]
     pub args: Vec<Spanned<String>>,
-    /// Expect the return value to equal this (FR-V-01).
-    #[serde(default)]
-    pub expect_eq: Option<Spanned<ScalarRaw>>,
-    /// Expect the return value to differ from this (FR-V-01).
-    #[serde(default)]
-    pub expect_ne: Option<Spanned<ScalarRaw>>,
     /// Record the duration of this call (FR-P-01, M3).
-    #[serde(default)]
     pub perf: bool,
+    /// Every `expect_*` field's value, keyed by its TOML name and carrying
+    /// the value span. Registered names route to the assertion registry;
+    /// unregistered `expect_*` names are unknown fields.
+    pub expectations: BTreeMap<String, Spanned<ScalarRaw>>,
+    /// Non-`expect_*` stray fields: name and value span for unknown-field
+    /// reporting (FR-C-09).
+    pub stray_fields: BTreeMap<String, Range<usize>>,
+}
+
+impl CmdDef {
+    /// The registered assertion fields present on this command, in registry
+    /// order.
+    ///
+    /// Unknown `expect_*` names and non-`expect_` stray fields are excluded:
+    /// validation reports those separately as `unknown_field`.
+    pub fn registered_assertions(
+        &self,
+    ) -> Vec<(
+        &'static dyn crate::assertion::Assertion,
+        &Spanned<ScalarRaw>,
+    )> {
+        let mut found = Vec::new();
+        for (name, assertion) in crate::assertion::iter() {
+            if let Some(value) = self.expectations.get(name) {
+                found.push((assertion, value));
+            }
+        }
+        found
+    }
+}
+
+impl<'de> Deserialize<'de> for CmdDef {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_map(CmdVisitor)
+    }
+}
+
+/// Deserializes one command table, routing `expect_*` keys to the assertion
+/// map and everything else to either a known field or the stray-field map.
+struct CmdVisitor;
+
+impl<'de> Visitor<'de> for CmdVisitor {
+    type Value = CmdDef;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a command table with `opfunc`")
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where
+        A: MapAccess<'de>,
+    {
+        let mut opfunc = None;
+        let mut args = Vec::new();
+        let mut perf = false;
+        let mut expectations = BTreeMap::new();
+        let mut stray_fields = BTreeMap::new();
+
+        while let Some(key) = map.next_key::<String>()? {
+            match key.as_str() {
+                "opfunc" => opfunc = Some(map.next_value::<Spanned<String>>()?),
+                "args" => args = map.next_value::<Vec<Spanned<String>>>()?,
+                "perf" => perf = map.next_value::<bool>()?,
+                expect_key if expect_key.starts_with("expect_") => {
+                    let value = map.next_value::<Spanned<ScalarRaw>>()?;
+                    expectations.insert(expect_key.to_string(), value);
+                }
+                _ => {
+                    // Capture the value span, then drop the value: the
+                    // validator reports the name and location.
+                    let value = map.next_value::<Spanned<de::IgnoredAny>>()?;
+                    stray_fields.insert(key, value.span());
+                }
+            }
+        }
+
+        let opfunc = opfunc.ok_or_else(|| de::Error::missing_field("opfunc"))?;
+        Ok(CmdDef {
+            opfunc,
+            args,
+            perf,
+            expectations,
+            stray_fields,
+        })
+    }
 }
 
 /// A concurrency group: its member tests run in parallel (FR-T-03, M2).
@@ -373,14 +463,37 @@ tests = ["test_sock"]                 # referenced tests no longer run standalon
         .unwrap();
         let cmds = &config.tests[0].get_ref().cmds;
         assert_eq!(
-            *cmds[0].get_ref().expect_eq.as_ref().unwrap().get_ref(),
+            *cmds[0].get_ref().expectations["expect_eq"].get_ref(),
             ScalarRaw::Int(0)
         );
         assert_eq!(
-            *cmds[1].get_ref().expect_eq.as_ref().unwrap().get_ref(),
+            *cmds[1].get_ref().expectations["expect_eq"].get_ref(),
             ScalarRaw::Str("0x10".to_string())
         );
-        assert!(cmds[3].get_ref().expect_eq.is_some());
+        assert!(cmds[3].get_ref().expectations.contains_key("expect_eq"));
+    }
+
+    #[test]
+    fn expect_fields_and_strays_are_captured_with_spans__F_V_02() {
+        // The open-ended `expect_*` namespace and stray fields both land in
+        // `expectations`, carrying spans so validation can locate them.
+        let config = parse(
+            "version = 1\n\
+             [[tests]]\n\
+             name = \"t\"\n\
+             cmds = [\n\
+             \x20 { opfunc = \"Call_a\", expect_ge = 5, expect_gt = 1, stray = 9 },\n\
+             ]\n",
+        )
+        .unwrap();
+        let cmd = config.tests[0].get_ref().cmds[0].get_ref();
+        assert_eq!(*cmd.expectations["expect_ge"].get_ref(), ScalarRaw::Int(5));
+        assert!(cmd.expectations.contains_key("expect_gt"));
+        assert!(cmd.stray_fields.contains_key("stray"));
+        // The value sits on line 5; its span must map there, not to the
+        // 0..0 default.
+        assert!(cmd.expectations["expect_ge"].span().start > 0);
+        assert!(cmd.stray_fields["stray"].start > 0);
     }
 
     #[test]

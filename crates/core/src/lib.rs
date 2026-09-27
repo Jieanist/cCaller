@@ -19,6 +19,7 @@
     )
 )]
 
+pub mod assertion;
 pub mod config;
 pub mod error;
 pub mod runtime;

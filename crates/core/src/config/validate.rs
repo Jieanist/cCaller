@@ -278,19 +278,51 @@ fn validate_cmd(
     let opfunc = cmd.opfunc.get_ref();
     let loc = doc.locate(cmd.opfunc.span());
 
-    let has_eq = cmd.expect_eq.is_some();
-    let has_ne = cmd.expect_ne.is_some();
-    if has_eq && has_ne {
+    // An unregistered `expect_*` name and every non-`expect_` stray field
+    // are unknown fields (FR-C-09); reporting here keeps the code and
+    // location contract intact while the assertion namespace stays open.
+    for (key, value) in &cmd.expectations {
+        if crate::assertion::lookup(key).is_none() {
+            out.push(Diagnostic::new(
+                codes::UNKNOWN_FIELD,
+                doc.locate(value.span()),
+                format!("unknown field `{key}`"),
+            ));
+        }
+    }
+    for (key, span) in &cmd.stray_fields {
+        out.push(Diagnostic::new(
+            codes::UNKNOWN_FIELD,
+            doc.locate(span.clone()),
+            format!("unknown field `{key}`"),
+        ));
+    }
+
+    let assertions = cmd.registered_assertions();
+    if assertions.len() > 1 {
+        let names: Vec<&'static str> = assertions
+            .iter()
+            .map(|(assertion, _)| assertion.field_name())
+            .collect();
         out.push(Diagnostic::new(
             codes::ASSERTION_CONFLICT,
             loc.clone(),
-            format!("{scope}: `expect_eq` and `expect_ne` are mutually exclusive"),
+            format!(
+                "{scope}: {} are mutually exclusive",
+                crate::assertion::backticked(&names)
+            ),
         ));
-    } else if !has_eq && !has_ne && require_assertion {
+    } else if assertions.is_empty() && require_assertion {
+        let expected: Vec<String> = crate::assertion::field_names()
+            .map(|name| format!("`{name}`"))
+            .collect();
         out.push(Diagnostic::new(
             codes::ASSERTION_MISSING,
             loc.clone(),
-            format!("{scope}: `{opfunc}` has neither `expect_eq` nor `expect_ne`"),
+            format!(
+                "{scope}: `{opfunc}` has no assertion (expected one of {})",
+                expected.join(", ")
+            ),
         ));
     }
 
@@ -695,6 +727,37 @@ cmds = [{ opfunc = "Call_ping", expect_eq = 0, expect_ne = 1 }]
             codes_of(&diags),
             vec!["assertion_conflict", "assertion_conflict"]
         );
+    }
+
+    #[test]
+    fn unknown_cmd_field_is_rejected_with_location__F_C_09() {
+        let diags = check(
+            r#"
+version = 1
+[[tests]]
+name = "t"
+cmds = [{ opfunc = "Call_ping", expect_eq = 0, stray = 1 }]
+"#,
+        );
+        assert_eq!(codes_of(&diags), vec!["unknown_field"]);
+        assert!(diags[0].message.contains("unknown field `stray`"));
+        assert!(diags[0].location.line >= 1);
+    }
+
+    #[test]
+    fn unknown_expect_field_is_rejected_as_unknown_field__F_C_09() {
+        // An unregistered `expect_*` name is an unknown field, not a
+        // silently ignored assertion (FR-C-09, FR-V-02).
+        let diags = check(
+            r#"
+version = 1
+[[tests]]
+name = "t"
+cmds = [{ opfunc = "Call_ping", expect_eq = 0, expect_gt = 5 }]
+"#,
+        );
+        assert_eq!(codes_of(&diags), vec!["unknown_field"]);
+        assert!(diags[0].message.contains("unknown field `expect_gt`"));
     }
 
     #[test]

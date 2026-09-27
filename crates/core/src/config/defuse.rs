@@ -319,10 +319,7 @@ fn resolve_env_cmds<'a>(
 
         // Expectations are optional in env commands, but a `$var` there is
         // just as unresolvable.
-        if let Some(raw) = &cmd.expect_eq {
-            check_env_expectation(raw.get_ref(), &site, &loc, out);
-        }
-        if let Some(raw) = &cmd.expect_ne {
+        for raw in cmd.expectations.values() {
             check_env_expectation(raw.get_ref(), &site, &loc, out);
         }
 

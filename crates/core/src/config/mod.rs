@@ -30,7 +30,7 @@ pub use check::{run_check, CheckReport, CheckStats, REPORT_SCHEMA};
 pub use defuse::{analyze_def_use, PARAM_PAGE_SLOTS};
 pub use diag::{codes, Diagnostic};
 pub use expand::{
-    expand_test, Expectation, ResolvedCmd, SubCase, MAX_COMBINATIONS_PER_INPUT_GROUP,
+    expand_test, ResolvedCmd, ResolvedExpectation, SubCase, MAX_COMBINATIONS_PER_INPUT_GROUP,
 };
 pub use lib_desc::{
     validate as validate_lib_description, FuncDecl, LibDescription, LibEntry, SlotRole,

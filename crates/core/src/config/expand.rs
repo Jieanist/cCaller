@@ -31,13 +31,34 @@ use super::value::{parse_value, ConcreteValue, ScalarRaw, ValueKind};
 /// into; larger groups are rejected instead of exhausting memory.
 pub const MAX_COMBINATIONS_PER_INPUT_GROUP: usize = 10_000;
 
-/// One expectation of a command after value resolution.
+/// One expectation of a command after value resolution and negation
+/// folding (FR-C-07, FR-V-02).
+///
+/// The enum of the previous design is gone: the final assertion kind is
+/// carried by name and resolved through the assertion registry at
+/// evaluation time, so a new assertion needs no change here.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Expectation {
-    /// The return value must equal the inner value (FR-V-01).
-    Eq(ConcreteValue),
-    /// The return value must differ from the inner value (FR-V-01).
-    Ne(ConcreteValue),
+pub struct ResolvedExpectation {
+    /// The final assertion field name after `!` folding, e.g. `expect_ne`.
+    pub kind: &'static str,
+    /// The resolved expected value.
+    pub value: ConcreteValue,
+}
+
+impl ResolvedExpectation {
+    /// Evaluates this expectation against the actual return value.
+    ///
+    /// The registry is authoritative for what the kind means; a kind that
+    /// is no longer registered (impossible for a validated configuration)
+    /// evaluates to a visible failure instead of panicking.
+    pub fn evaluate(&self, actual: i64) -> crate::assertion::AssertionOutcome {
+        let passed = crate::assertion::lookup(self.kind)
+            .is_some_and(|assertion| assertion.evaluate(&self.value, actual));
+        crate::assertion::AssertionOutcome {
+            passed,
+            expectation: format!("{} {}", self.kind, self.value),
+        }
+    }
 }
 
 /// A command with every value resolved against a sub-case binding.
@@ -48,7 +69,7 @@ pub struct ResolvedCmd {
     /// Parameter name and concrete value, in declared order.
     pub args: Vec<(String, ConcreteValue)>,
     /// The resolved expectation, if the command carries one.
-    pub expect: Option<Expectation>,
+    pub expect: Option<ResolvedExpectation>,
 }
 
 /// One concrete sub-case of a test (FR-C-05).
@@ -581,34 +602,27 @@ fn resolve_cmds(
             }
         }
 
-        let expect = match (&cmd.expect_eq, &cmd.expect_ne) {
-            (Some(raw), None) => match resolve_expectation(raw.get_ref(), false, bindings) {
-                Ok(e) => Some(e),
-                Err((code, message)) => {
-                    agg.push(Diagnostic::new(
-                        code,
-                        loc.clone(),
-                        format!("{site}: {message}"),
-                    ));
-                    ok = false;
-                    None
+        let expect = {
+            let assertions = cmd.registered_assertions();
+            match assertions.as_slice() {
+                [(assertion, raw)] => {
+                    match resolve_expectation(*assertion, raw.get_ref(), bindings) {
+                        Ok(e) => Some(e),
+                        Err((code, message)) => {
+                            agg.push(Diagnostic::new(
+                                code,
+                                loc.clone(),
+                                format!("{site}: {message}"),
+                            ));
+                            ok = false;
+                            None
+                        }
+                    }
                 }
-            },
-            (None, Some(raw)) => match resolve_expectation(raw.get_ref(), true, bindings) {
-                Ok(e) => Some(e),
-                Err((code, message)) => {
-                    agg.push(Diagnostic::new(
-                        code,
-                        loc.clone(),
-                        format!("{site}: {message}"),
-                    ));
-                    ok = false;
-                    None
-                }
-            },
-            // Validation enforces "exactly one" for test commands; env
-            // commands are not resolved here.
-            _ => None,
+                // Validation enforces "exactly one" for test commands; env
+                // commands are not resolved here.
+                _ => None,
+            }
         };
 
         resolved.push(ResolvedCmd {
@@ -648,11 +662,15 @@ fn resolve_cmd_value(
 
 /// Resolves an expectation value, folding the FR-C-07 negation into the
 /// final expectation kind: `expect_eq = "!7"` is `expect_ne = 7`.
+///
+/// The registered assertion declares how `!` folds it (its
+/// [`Assertion::negated_field_name`]); a fold whose counterpart is not
+/// registered is a load-time error, never a silent drop.
 fn resolve_expectation(
+    declared: &'static dyn crate::assertion::Assertion,
     raw: &ScalarRaw,
-    declared_ne: bool,
     bindings: &BTreeMap<String, ConcreteValue>,
-) -> Result<Expectation, (&'static str, String)> {
+) -> Result<ResolvedExpectation, (&'static str, String)> {
     let (value, value_negated) = match raw {
         ScalarRaw::Int(i) => (ConcreteValue::Int(*i), false),
         ScalarRaw::Str(s) => {
@@ -671,10 +689,33 @@ fn resolve_expectation(
             (value, parsed.negated)
         }
     };
-    Ok(if declared_ne ^ value_negated {
-        Expectation::Ne(value)
+    let assertion = if value_negated {
+        match declared.negated_field_name() {
+            Some(name) => crate::assertion::lookup(name).ok_or_else(|| {
+                (
+                    codes::INVALID_VALUE,
+                    format!(
+                        "negation `!` on `{}` folds into `{name}`, which is not registered",
+                        declared.field_name()
+                    ),
+                )
+            })?,
+            None => {
+                return Err((
+                    codes::INVALID_VALUE,
+                    format!(
+                        "negation `!` is not supported for `{}`",
+                        declared.field_name()
+                    ),
+                ));
+            }
+        }
     } else {
-        Expectation::Eq(value)
+        declared
+    };
+    Ok(ResolvedExpectation {
+        kind: assertion.field_name(),
+        value,
     })
 }
 
@@ -1052,11 +1093,17 @@ args = { val = [7, 9] }
         );
         assert_eq!(
             subcases[0].cmds[0].expect,
-            Some(Expectation::Eq(ConcreteValue::Int(7)))
+            Some(ResolvedExpectation {
+                kind: "expect_eq",
+                value: ConcreteValue::Int(7)
+            })
         );
         assert_eq!(
             subcases[1].cmds[0].expect,
-            Some(Expectation::Eq(ConcreteValue::Int(9)))
+            Some(ResolvedExpectation {
+                kind: "expect_eq",
+                value: ConcreteValue::Int(9)
+            })
         );
     }
 
@@ -1076,11 +1123,26 @@ cmds = [
 "#,
         );
         let cmds = &subcases[0].cmds;
-        assert_eq!(cmds[0].expect, Some(Expectation::Ne(ConcreteValue::Int(7))));
-        assert_eq!(cmds[1].expect, Some(Expectation::Eq(ConcreteValue::Int(7))));
+        assert_eq!(
+            cmds[0].expect,
+            Some(ResolvedExpectation {
+                kind: "expect_ne",
+                value: ConcreteValue::Int(7)
+            })
+        );
+        assert_eq!(
+            cmds[1].expect,
+            Some(ResolvedExpectation {
+                kind: "expect_eq",
+                value: ConcreteValue::Int(7)
+            })
+        );
         assert_eq!(
             cmds[2].expect,
-            Some(Expectation::Ne(ConcreteValue::Int(16)))
+            Some(ResolvedExpectation {
+                kind: "expect_ne",
+                value: ConcreteValue::Int(16)
+            })
         );
     }
 
