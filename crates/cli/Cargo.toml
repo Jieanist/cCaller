@@ -10,6 +10,11 @@ repository.workspace = true
 [lints]
 workspace = true
 
+[dependencies]
+clap.workspace = true
+log.workspace = true
+env_logger.workspace = true
+
 [[bin]]
 name = "ccaller"
 path = "src/main.rs"

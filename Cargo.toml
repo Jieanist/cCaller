@@ -24,3 +24,9 @@ panic = "warn"
 [workspace.dependencies]
 # Style guide section 6.1 mandates thiserror for per-crate error types.
 thiserror = "2"
+# clap: subcommand CLI with aliases and generated help (FR-X-01); hand-
+# rolling this is error-prone. log/env_logger: FR-R-02 leveled logging
+# with RUST_LOG override; env_logger writes to stderr by default.
+clap = { version = "4", features = ["derive"] }
+log = "0.4"
+env_logger = "0.11"
