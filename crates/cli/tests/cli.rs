@@ -41,9 +41,35 @@ fn invalid_log_level_exits_with_config_error_code__F_R_02() {
 }
 
 #[test]
-fn bare_invocation_prints_help_and_exits_zero__F_X_01() {
-    let output = ccaller().output().unwrap();
+fn help_flag_prints_help_and_exits_zero__F_X_01() {
+    // `run` is now the default subcommand, so the way to ask for help is
+    // an explicit --help, not a bare invocation (FR-X-01).
+    let output = ccaller().arg("--help").output().unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Usage: ccaller"), "stdout was: {stdout}");
+}
+
+#[test]
+fn bare_invocation_requires_test_and_lib__F_X_01() {
+    // The default `run` subcommand needs both --test and --lib; a bare
+    // invocation is therefore a usage error (exit 2), not help (FR-X-01).
+    let output = ccaller().output().unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--test") && stderr.contains("--lib"),
+        "stderr was: {stderr}"
+    );
+}
+
+#[test]
+fn run_subcommand_exposes_help__F_X_01() {
+    // The ABI conformance kit probes `ccaller run --help` to detect that
+    // the subcommand exists, so this must succeed without side effects.
+    let output = ccaller().arg("run").arg("--help").output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "stdout was: {stdout}");
+    assert!(stdout.contains("run"), "stdout was: {stdout}");
 }
