@@ -6,6 +6,23 @@
 
 ## [Unreleased]
 
+### M2：串行执行（`run` 子命令）
+
+#### 新增
+
+- `ccaller run` 子命令（默认子命令，FR-X-01）：加载库描述、ABI 握手、
+  串行执行每个子用例，退出码契约 0/1/2/3（FR-X-02、需求 7.5）。
+- 执行上下文 `Runner`（AR-03）：显式持有已加载库、param_page、计划与
+  Reporter，无全局可变状态。
+- 运行计划 `Plan`：库路径相对描述文件解析、env 四层（global/process/
+  case/thread，Q-13 顺序）解析为可执行命令。
+- `Reporter` 扩展点 + 控制台实现：Total/Success/Failure/skipped 摘要 +
+  失败用例清单，结果走 stdout、日志走 stderr、无 ANSI 颜色（FR-R-01/02）。
+- 断言语义：返回值分类（成功/跳过/保留区间违约）与断言求值；SKIP 为
+  Cmd 级且不影响退出码（Q-01、FR-T-07）。
+- env 失败可见性：init/exit 失败计入失败并影响退出码（FR-E-03、NFR-02）。
+- 空运行规则：0 用例非零退出，`--allow-empty` 显式放行（Q-08）。
+
 ### 断言扩展点（FR-V-02、F-V-03）
 
 #### 新增
