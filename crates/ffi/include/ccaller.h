@@ -86,6 +86,18 @@ extern "C" {
 #define CCALLER_ERR_FRAMEWORK_RESERVED_MAX (-128)
 
 /*
+ * Number of uint64_t slots in one thread's param_page (FR-A-06).
+ * Valid indices are [0, CCALLER_PARAM_PAGE_SLOTS). Wrappers must
+ * bounds-check every index before touching the page (style guide
+ * 8.1.5); the fixed size keeps the static def-use analysis
+ * (FR-C-10) and the runtime page in exact agreement.
+ *
+ * Precondition: none. param_page: neither read nor written by this
+ * constant itself. Return value: n/a (compile-time constant).
+ */
+#define CCALLER_PARAM_PAGE_SLOTS 512
+
+/*
  * Unified call signature - TEMPLATE ONLY, do not paste as a
  * declaration. Each library exports its own concrete instances named
  * Call_<name>, resolved by symbol name at load time (FR-A-02):
@@ -94,8 +106,8 @@ extern "C" {
  *                       const int64_t *params,
  *                       int64_t param_len);
  *
- * param_page  Page of 512 uint64_t slots owned by the framework, one
- *             per worker thread. Valid indices are [0, 512). A value
+ * param_page  Page of CCALLER_PARAM_PAGE_SLOTS uint64_t slots owned
+ *             by the framework, one per worker thread. A value
  *             written during one Cmd stays visible to later Cmds on
  *             the same thread; pages are never shared across threads
  *             (FR-A-06, decision Q-06). Bounds-check every index

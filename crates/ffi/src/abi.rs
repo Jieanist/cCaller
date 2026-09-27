@@ -127,6 +127,12 @@ mod tests {
             "CCALLER_ERR_FRAMEWORK_RESERVED_MAX",
             CCALLER_ERR_FRAMEWORK_RESERVED_MAX,
         ),
+        // The page-size constant is a `usize` on the Rust side; the
+        // header define carries the same number.
+        (
+            "CCALLER_PARAM_PAGE_SLOTS",
+            crate::page::PARAM_PAGE_SLOTS as i64,
+        ),
     ];
 
     /// Numeric value of `#define <name> ...` in the header.
