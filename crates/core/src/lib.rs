@@ -22,6 +22,12 @@
 pub mod assertion;
 pub mod config;
 pub mod error;
+pub mod plan;
+pub mod report;
+pub mod run;
 pub mod runtime;
 
 pub use error::{CoreError, Location};
+pub use plan::{build_plan, Plan, PlanOutcome};
+pub use report::{ConsoleReporter, FailedCase, Reporter, RunReport, RunSummary};
+pub use run::{execute, RunError, Runner};
