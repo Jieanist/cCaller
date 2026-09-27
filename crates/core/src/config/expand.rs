@@ -1147,6 +1147,54 @@ cmds = [
     }
 
     #[test]
+    fn comparison_assertion_resolves_and_evaluates__F_V_03() {
+        // The registry routes `expect_ge` through the same expansion path as
+        // eq/ne, including `$var` substitution — no scheduler or config-model
+        // change was needed to add it.
+        let (subcases, diags) = expand_first(
+            r#"
+version = 1
+[[tests]]
+name = "t"
+cmds = [{ opfunc = "Call_ping", expect_ge = "$floor" }]
+[[tests.inputs]]
+name = "g"
+args = { floor = [7, 9] }
+"#,
+        );
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        assert_eq!(
+            subcases[0].cmds[0].expect,
+            Some(ResolvedExpectation {
+                kind: "expect_ge",
+                value: ConcreteValue::Int(7)
+            })
+        );
+        let expectation = subcases[0].cmds[0].expect.as_ref().unwrap();
+        assert!(expectation.evaluate(7).passed);
+        assert!(expectation.evaluate(8).passed);
+        assert!(!expectation.evaluate(6).passed);
+        assert_eq!(expectation.evaluate(8).expectation, "expect_ge 7");
+    }
+
+    #[test]
+    fn comparison_assertion_negation_without_counterpart_is_rejected__F_V_03() {
+        // `expect_ge` folds `!` into `expect_lt`, which is not registered;
+        // the fold must fail loudly instead of being dropped.
+        let (subcases, diags) = expand_first(
+            r#"
+version = 1
+[[tests]]
+name = "t"
+cmds = [{ opfunc = "Call_ping", expect_ge = "!7" }]
+"#,
+        );
+        assert_eq!(codes_of(&diags), vec!["invalid_value"]);
+        assert!(diags[0].message.contains("expect_lt"));
+        assert!(subcases.is_empty());
+    }
+
+    #[test]
     fn negation_in_arg_position_is_rejected__F_C_07() {
         let (subcases, diags) = expand_first(
             r#"

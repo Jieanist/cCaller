@@ -761,6 +761,35 @@ cmds = [{ opfunc = "Call_ping", expect_eq = 0, expect_gt = 5 }]
     }
 
     #[test]
+    fn registered_comparison_assertion_counts_as_assertion__F_V_03() {
+        // `expect_ge` satisfies the "at least one assertion" rule, so no
+        // assertion_missing is reported.
+        let diags = check(
+            r#"
+version = 1
+[[tests]]
+name = "t"
+cmds = [{ opfunc = "Call_ping", expect_ge = 0 }]
+"#,
+        );
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+    }
+
+    #[test]
+    fn eq_and_ge_conflict_is_reported__F_V_03() {
+        let diags = check(
+            r#"
+version = 1
+[[tests]]
+name = "t"
+cmds = [{ opfunc = "Call_ping", expect_eq = 0, expect_ge = 1 }]
+"#,
+        );
+        assert_eq!(codes_of(&diags), vec!["assertion_conflict"]);
+        assert!(diags[0].message.contains("mutually exclusive"));
+    }
+
+    #[test]
     fn unknown_opfunc_is_reported__F_C_08() {
         let diags = check(
             r#"

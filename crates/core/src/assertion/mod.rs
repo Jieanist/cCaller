@@ -10,6 +10,7 @@
 //! scheduling and configuration model are untouched (G-02, A-2).
 
 mod eq;
+mod ge;
 mod ne;
 
 use std::fmt::Debug;
@@ -17,6 +18,7 @@ use std::fmt::Debug;
 use crate::config::value::ConcreteValue;
 
 pub use eq::Eq;
+pub use ge::Ge;
 pub use ne::Ne;
 
 /// Result of evaluating one resolved assertion against an actual value.
@@ -59,7 +61,8 @@ pub trait Assertion: Debug + Send + Sync {
 /// implements [`Assertion`]; nothing else changes (FR-V-02, G-02, A-2).
 /// Order here is the canonical order used when several field names must be
 /// listed in one diagnostic.
-static ASSERTIONS: &[(&str, &dyn Assertion)] = &[("expect_eq", &Eq), ("expect_ne", &Ne)];
+static ASSERTIONS: &[(&str, &dyn Assertion)] =
+    &[("expect_eq", &Eq), ("expect_ne", &Ne), ("expect_ge", &Ge)];
 
 /// Looks up a registered assertion by its configuration field name.
 pub fn lookup(field_name: &str) -> Option<&'static dyn Assertion> {
