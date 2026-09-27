@@ -58,6 +58,16 @@ pub mod codes {
     pub const DUPLICATE_INPUT_NAME: &str = "duplicate_input_name";
     /// An InputGroup `refs` entry is not a `shared_inputs` key.
     pub const UNKNOWN_SHARED_INPUT: &str = "unknown_shared_input";
+    /// The same parameter arrives from two sources (refs or own args).
+    pub const CONFLICTING_INPUT_PARAM: &str = "conflicting_input_param";
+    /// A `shared_inputs` value uses `$var`; shared values must be literals.
+    pub const SHARED_NOT_LITERAL: &str = "shared_not_literal";
+    /// A `$var` reference has no definition in the reachable scope.
+    pub const UNRESOLVED_VAR: &str = "unresolved_var";
+    /// A value violates the value grammar or is invalid in its position.
+    pub const INVALID_VALUE: &str = "invalid_value";
+    /// An input group expands beyond the combination limit.
+    pub const TOO_MANY_COMBINATIONS: &str = "too_many_combinations";
 }
 
 /// One load-time finding as reported by `ccaller check`.
