@@ -43,6 +43,15 @@ pub enum CoreError {
         /// Human-readable description of the violated rule.
         message: String,
     },
+    /// A configuration file could not be read from disk.
+    #[error("failed to read `{path}`: {source}")]
+    Io {
+        /// Path of the file that could not be read.
+        path: String,
+        /// The underlying I/O failure.
+        #[source]
+        source: std::io::Error,
+    },
 }
 
 #[cfg(test)]

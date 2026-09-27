@@ -24,6 +24,12 @@ panic = "warn"
 [workspace.dependencies]
 # Style guide section 6.1 mandates thiserror for per-crate error types.
 thiserror = "2"
+# serde: strict derive models with deny_unknown_fields (FR-C-09); toml:
+# the only configuration input format in v1.0 (requirement spec 7.2/7.3)
+# and the only crate whose spans map errors back to line/column (FR-C-10).
+# Hand-rolling a TOML parser with span tracking is error-prone.
+serde = { version = "1", features = ["derive"] }
+toml = "0.9"
 # clap: subcommand CLI with aliases and generated help (FR-X-01); hand-
 # rolling this is error-prone. log/env_logger: FR-R-02 leveled logging
 # with RUST_LOG override; env_logger writes to stderr by default.
