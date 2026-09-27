@@ -4,13 +4,17 @@
 //! Each fixture under `tests/fixtures/` is its own workspace (empty
 //! `[workspace]` table) so the root workspace never picks it up and
 //! parallel fixture builds cannot contend on one target directory.
+//! Builds are additionally cached per test process so several tests
+//! sharing one fixture compile it exactly once.
 
 // Test-support code: the unwrap/expect exemptions mirror the ones the
 // integration-test crates carry (style guide section 6.3).
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::{Mutex, OnceLock};
 
 /// Build `crates/ffi/tests/fixtures/<name>` and return the path of
 /// the produced cdylib.
@@ -19,6 +23,21 @@ use std::process::Command;
 /// (requirement spec 7.7 platform matrix keeps the test suite
 /// self-contained on Windows and Linux alike).
 pub fn build_fixture(name: &str) -> PathBuf {
+    static CACHE: OnceLock<Mutex<HashMap<String, PathBuf>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    // Hold the lock across the build: test threads then serialize on
+    // the first build and hit the cache afterwards.
+    let mut guard = cache.lock().unwrap();
+    if let Some(path) = guard.get(name) {
+        return path.clone();
+    }
+    let path = compile_fixture(name);
+    guard.insert(name.to_string(), path.clone());
+    path
+}
+
+/// The uncached `cargo build` of one fixture crate.
+fn compile_fixture(name: &str) -> PathBuf {
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
         .join("fixtures")
