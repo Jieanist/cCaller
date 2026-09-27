@@ -20,5 +20,4 @@ LOOKUP.md
 **/*.rs.bk
 
 # cCaller runtime and verification artifacts (never part of the source tree)
-verify/reports/
 report/

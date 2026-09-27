@@ -4,9 +4,6 @@
 *.rs  text eol=lf
 *.c   text eol=lf
 *.h   text eol=lf
-# MANIFEST.sha256 hashes exact bytes: every file under verify/ must
-# always check out with LF endings, including .toml/.py/.yaml/.txt.
-verify/** text eol=lf
 *.so binary
 *.dll binary
 *.a binary

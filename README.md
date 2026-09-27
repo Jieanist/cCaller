@@ -4,7 +4,7 @@
 输入展开、静态槽位 def-use 分析与执行调度。
 
 > **当前状态**：里程碑 M1 —— 配置模型与 `ccaller check` 已可用。
-> `run`（实际执行）在后续里程碑落地。规范见 `docs/v1.0/` 四件套（唯一权威）。
+> `run`（实际执行）在后续里程碑落地。
 
 ## 构建
 
@@ -21,7 +21,7 @@ cargo build --release
 写两份 TOML：**库描述**（声明被测动态库与导出函数）与**用例配置**（声明测试与命令序列）。
 
 ```toml
-# libs.toml —— 库描述（规范见需求说明书 7.2）
+# libs.toml —— 库描述
 version = 1
 
 [[libs]]
@@ -33,7 +33,7 @@ funcs = [
 ```
 
 ```toml
-# cases.toml —— 用例配置（规范见需求说明书 7.3）
+# cases.toml —— 用例配置
 version = 1
 
 [shared_inputs.common]
@@ -62,7 +62,7 @@ ccaller --test cases.toml --lib libs.toml check
 ok: 1 tests, 2 subcases, 4 commands
 ```
 
-机器可读输出（JSON 契约见需求说明书 7.6）：
+机器可读输出：
 
 ```
 ccaller --test cases.toml --lib libs.toml check --format json
@@ -74,8 +74,8 @@ ccaller --test cases.toml --lib libs.toml check --format json
 
 | 选项 | 说明 |
 |---|---|
-| `-t, --test <FILE>` | 用例配置文件（需求说明书 7.3）；兼容别名 `--test_case` |
-| `-i, --lib <FILE>` | 库描述文件（需求说明书 7.2）；兼容别名 `--input` |
+| `-t, --test <FILE>` | 用例配置文件；兼容别名 `--test_case` |
+| `-i, --lib <FILE>` | 库描述文件；兼容别名 `--input` |
 | `-l, --log <LEVEL>` | 日志级别：1-4（error/warn/info/debug）或级别名；`RUST_LOG` 优先 |
 | `-h, --help` | 打印帮助 |
 | `-V, --version` | 打印版本 |
@@ -86,24 +86,28 @@ ccaller --test cases.toml --lib libs.toml check --format json
 |---|---|
 | `check` | 加载期校验 + 静态槽位 def-use 分析 + 展开数量统计，不执行；`--format text\|json`（默认 `text`） |
 
-`run`（执行用例）等其余子命令见需求说明书 FR-X-01，随后续里程碑落地。
+`run`（执行用例）等其余子命令随后续里程碑落地。
 
 ## 退出码
 
 | 码 | 含义 |
 |---|---|
 | 0 | 全部通过（允许存在 skipped） |
-| 1 | 存在用例失败（随 M2 `run` 落地） |
+| 1 | 存在用例失败（随 `run` 落地） |
 | 2 | 配置/环境错误：加载期校验失败、用法错误、文件不可读 |
 | 3 | 框架内部错误（bug） |
 
-契约出处：需求说明书 FR-X-02 / 7.5。
-
 ## 配置格式
 
-字段表、值语法与完整示例的规范性定义见 `docs/v1.0/需求说明书.md` §7.2（库描述）
-与 §7.3（用例配置）。README 只提供最小可跑示例，不复制字段表
-（三类文档各司其职，见代码与注释风格规范 §12.1）。
+**库描述**声明动态库路径与每个导出函数的参数名列表；参数若表示 `param_page`
+的下标，用 `slot_roles` 标注它是被写还是被读（框架据此在加载期做
+"读之前必须有人写过"的静态检查）。
+
+**用例配置**声明测试、命令序列与输入组；输入组支持单值、列表与闭区间，
+同一组内多值参数按笛卡尔积展开，子用例名形如 `test_rw_u32/ipt1#0[val=888]`。
+
+上面的示例覆盖了最常用的字段。更完整的字段以 `ccaller check` 的输出为准：
+每条诊断都会给出文件名、行号、列号与可读的说明。
 
 ## 仓库结构
 
@@ -111,6 +115,5 @@ ccaller --test cases.toml --lib libs.toml check --format json
 |---|---|
 | `crates/core` | 领域层：配置解析、校验、输入展开、def-use 分析 |
 | `crates/cli` | `ccaller` 命令行 |
-| `crates/ffi`、`crates/gen` | 预留（后续里程碑） |
-| `docs/v1.0/` | 唯一权威规范：需求说明书 / FeatureList / 验证方案 / 代码与注释风格规范 |
-| `verify/` | 验证脚本与语料（治理规则见验证方案 §5，`verify/` 冻结后只读） |
+| `crates/ffi` | 动态库加载、ABI 契约、param_page（进行中） |
+| `docs/` | 补充文档 |
