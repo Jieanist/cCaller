@@ -15,8 +15,8 @@
 /// Exit codes of the ccaller binary; see the module docs for the contract.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i32)]
-// Only Success is constructed in the M0 skeleton; the failing variants
-// are wired up by the run/check subcommands landing in M1+.
+// Success and ConfigError are exercised by the check subcommand (M1);
+// TestFailed and InternalError land with the run subcommand (M2/M3).
 #[allow(dead_code)]
 pub enum ExitCode {
     /// All selected cases passed; skipped cases are allowed.

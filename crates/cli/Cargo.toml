@@ -11,9 +11,14 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+ccaller-core.workspace = true
 clap.workspace = true
 log.workspace = true
 env_logger.workspace = true
+
+[dev-dependencies]
+# Integration tests parse the 7.6 JSON contract of `check --format json`.
+serde_json.workspace = true
 
 [[bin]]
 name = "ccaller"

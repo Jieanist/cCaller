@@ -40,3 +40,6 @@ serde_json = "1"
 clap = { version = "4", features = ["derive"] }
 log = "0.4"
 env_logger = "0.11"
+# Workspace member crates, referenced by path so the graph stays inside
+# the workspace (cli -> core, per AR-02 layering).
+ccaller-core = { path = "crates/core" }
