@@ -54,3 +54,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: EmbarkStudios/cargo-deny-action@v2
+
+  baseline:
+    # F-G-04: record the perf baseline on every push; thresholds are
+    # derived from measured numbers (docs/baselines.md), never guessed.
+    name: Perf baseline
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Warm-up build (excluded from timing)
+        run: cargo build --release --workspace
+      - name: Record baseline (incremental no-op release build, 5 runs)
+        run: tools/perf_baseline.sh 5 cargo build --release --workspace
