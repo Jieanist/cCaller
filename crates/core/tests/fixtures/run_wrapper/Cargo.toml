@@ -1,0 +1,13 @@
+# Wrapper fixture for the core run integration tests. Not a member of
+# the root workspace (empty [workspace] table) so workspace builds never
+# pick it up; the test compiles it on demand with cargo.
+[package]
+name = "run_wrapper"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
