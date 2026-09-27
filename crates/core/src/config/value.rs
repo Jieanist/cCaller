@@ -12,7 +12,8 @@
 use std::fmt;
 
 /// A scalar exactly as it appears in the TOML file, before grammar parsing.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(untagged)]
 pub enum ScalarRaw {
     /// A TOML integer literal, already a concrete value.
     Int(i64),
