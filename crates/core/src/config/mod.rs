@@ -8,10 +8,12 @@
 //! [`validate`] runs the cross-reference rules of FR-C-08, [`expand`]
 //! turns input groups into concrete sub-cases (FR-C-03~06), [`defuse`]
 //! runs the slot def-use analysis over the expanded sub-cases (FR-C-10),
-//! and [`value`] defines the scalar grammar shared by command arguments
-//! and expectation values.
+//! [`check`] glues every stage into the 7.6 report, and [`value`]
+//! defines the scalar grammar shared by command arguments and
+//! expectation values.
 
 pub mod cases;
+pub mod check;
 pub mod defuse;
 pub mod diag;
 pub mod expand;
@@ -24,6 +26,7 @@ pub use cases::{
     CaseConfig, CaseEnv, CmdDef, ConcurrencyGroup, GlobalEnv, InputGroup, InputValue, RangeSpec,
     TestDef,
 };
+pub use check::{run_check, CheckReport, CheckStats, REPORT_SCHEMA};
 pub use defuse::{analyze_def_use, PARAM_PAGE_SLOTS};
 pub use diag::{codes, Diagnostic};
 pub use expand::{

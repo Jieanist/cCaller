@@ -30,6 +30,10 @@ thiserror = "2"
 # Hand-rolling a TOML parser with span tracking is error-prone.
 serde = { version = "1", features = ["derive"] }
 toml = "0.9"
+# serde_json: the machine-readable report contract of requirement spec
+# 7.6 (`check`/`expand` --format json). Owned by core so the CLI stays a
+# thin shell and the contract stays testable without it.
+serde_json = "1"
 # clap: subcommand CLI with aliases and generated help (FR-X-01); hand-
 # rolling this is error-prone. log/env_logger: FR-R-02 leveled logging
 # with RUST_LOG override; env_logger writes to stderr by default.
