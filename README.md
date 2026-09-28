@@ -4,8 +4,8 @@
 输入展开、静态槽位 def-use 分析与并发执行调度。
 
 - **当前状态**：M4 —— 并发执行、死亡测试隔离、perf、debug、JSON/JUnit 报告，以及
-  `expand`/`init`/`fmt` 开发者工具、六种断言、InputGroup 组级覆盖。
-- **路线图**：`gen`（宏驱动 wrapper → 自动生成 TOML）、`migrate`（hitest→cCaller 迁移）。
+  `expand`/`init`/`fmt`/`gen` 开发者工具、六种断言、InputGroup 组级覆盖。
+- **路线图**：`migrate`（hitest→cCaller 迁移）。
 
 ## 构建
 
@@ -70,7 +70,7 @@ ccaller --test cases.toml --lib libs.toml run     # 并发执行 + 报告
 - **参数化**：`shared_inputs` + `refs` + 列表/区间 + `$var`。
 - **断言**：`expect_eq` / `expect_ne` / `expect_ge` / `expect_gt` / `expect_le` / `expect_lt`。
 - **报告**：`run --format text|json|junit`。
-- **开发者工具**：`expand`（展开清单）/ `init`（脚手架）/ `fmt`（规范化）。
+- **开发者工具**：`expand`（展开清单）/ `init`（脚手架）/ `fmt`（规范化）/ `gen`（宏 → 生成 TOML）。
 
 完整文档见 [docs/](docs/README.md)，端到端示例见 [examples/libc_wrapper/](examples/libc_wrapper/)。
 

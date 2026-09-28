@@ -24,9 +24,13 @@ ccaller [全局选项] [子命令]
 | `expand` | 打印每个用例展开后的子用例清单（名字 + 绑定）；`--format text\|json` |
 | `init [DIR]` | 脚手架生成 libs.toml + cases.toml；`--build-sh` 附带编译脚本；不覆盖已存在文件 |
 | `fmt [FILE]` | 规范化重排配置；默认 stdout；`--in-place` 原位写回 |
+| `gen <source.c> [-o FILE]` | 扫描宏声明的 wrapper 源码 → 生成 libs.toml（默认 `./libs.toml`，覆盖写） |
 
 > `fmt` 的原地写回只有长旗 `--in-place`——短旗 `-i` 已被全局 `-i/--lib` 占用（clap 冲突）。
 > `fmt` 缺省 FILE 时回退用 `-t/--test` 指定的文件。
+
+> `gen` 默认写 `./libs.toml` 是**覆盖写**（生成器语义：wrapper 源码是唯一事实来源），
+> 与 `init` 的拒绝覆盖不同；用 `-o` 指定输出路径。
 
 隐藏选项：`--isolate-test` / `--isolate-subcase`（成对校验，控制死亡测试隔离方式）。
 

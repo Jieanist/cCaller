@@ -53,15 +53,52 @@ funcs = [
 
 `slot_roles` 取值：`read` / `write` / `read_write`。
 
-## 宏驱动写法（路线图，M4 `gen`）
+## 宏驱动写法（`ccaller gen`）
 
-hitest 里的 `export_function.h` + 生成器允许「用宏定义函数 → 自动生成 TOML」，避免手抄
-`libs.toml`。cCaller 计划提供等价能力：一个宏头 + `ccaller gen` 子命令，用宏同时声明函数名、
-参数名与 slot_roles，生成器扫描源码派生出 `libs.toml`：
+手写 `Call_*` 签名容易和 `libs.toml` 脱节。改用 `ccaller_gen.h` 的宏声明函数，让
+`ccaller gen` 扫描源码自动生成库描述——wrapper 源码是唯一事实来源：
 
 ```c
-// 设想中的用法（尚未落地）
-CCALLER_FUNC(malloc, len, mem_idx:write) { /* ... */ }
+// wrapper.c
+#include "ccaller_gen.h"
+
+int64_t CCaller_abi_version(void) { return CCALLER_ABI_VERSION; }
+
+CCALLER_FUNC(malloc, len, mem_idx:write)
+{
+    /* 函数体，直接使用 param_page / params / param_len */
+    return CCALLER_OK;
+}
+
+CCALLER_FUNC(add, a, b)
+{
+    return params[0] + params[1];
+}
 ```
 
-此功能落在 M4 的 `gen` 子命令，落地后本文档会补完整示例与说明。
+宏参数语法：`name` 是函数名（导出 `Call_<name>`）；`ident` 是值参数；`ident:read` /
+`ident:write` / `ident:read_write` 是 param_page 槽位下标参数。可变尾参只是扫描器元数据，
+不进入展开，不影响编译。
+
+生成：
+
+```sh
+ccaller gen wrapper.c               # 生成 ./libs.toml
+ccaller gen wrapper.c -o libs.toml  # 指定输出路径
+```
+
+生成结果：
+
+```toml
+version = 1
+[[libs]]
+path = "wrapper.so"     # 源文件 stem + 平台扩展；Windows 为 .dll
+funcs = [
+  { name = "Call_malloc", paras = ["len", "mem_idx"], slot_roles = { mem_idx = "write" } },
+  { name = "Call_add",    paras = ["a", "b"] },
+]
+```
+
+扫描器按 C 翻译阶段顺序处理：先做反斜杠-换行拼接，再把注释/字符串内容按字节等长掩码
+（偏移不变 → 行列精确），跳过 `#define` 行与异平台条件编译块（`#else` 正确保留、嵌套 `#if`
+用栈维护）。生成的 `libs.toml` 可直接配合用例配置跑 `ccaller check`。
