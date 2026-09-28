@@ -102,3 +102,5 @@ funcs = [
 扫描器按 C 翻译阶段顺序处理：先做反斜杠-换行拼接，再把注释/字符串内容按字节等长掩码
 （偏移不变 → 行列精确），跳过 `#define` 行与异平台条件编译块（`#else` 正确保留、嵌套 `#if`
 用栈维护）。生成的 `libs.toml` 可直接配合用例配置跑 `ccaller check`。
+
+端到端可运行样例见 [examples/gen/](../examples/gen/README.md)。
