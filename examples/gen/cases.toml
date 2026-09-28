@@ -1,0 +1,25 @@
+# End-to-end demo for the macro-driven wrapper (wrapper.c) + generated libs.toml.
+#
+# Workflow:
+#   ccaller gen wrapper.c        # -> libs.toml (see .gitignore)
+#   sh build.sh                  # -> wrapper.so
+#   ccaller --test cases.toml --lib libs.toml check
+#   ccaller --test cases.toml --lib libs.toml run
+
+version = 1
+
+[[tests]]
+name = "t_gen_basic"
+cmds = [
+  # Value params only.
+  { opfunc = "Call_add", expect_eq = 30, args = ["a=10", "b=20"] },
+
+  # Slot write -> read -> read_write, all against the same idx.
+  { opfunc = "Call_store", expect_eq = 0, args = ["idx=0", "v=7"] },
+  { opfunc = "Call_load",  expect_eq = 7, args = ["idx=0"] },
+  { opfunc = "Call_bump",  expect_eq = 7, args = ["idx=0"] },   # old value 7
+  { opfunc = "Call_bump",  expect_eq = 8, args = ["idx=0"] },   # old value 8
+
+  # Skip short-circuits: counted skipped, never a failure.
+  { opfunc = "Call_skip", expect_eq = 0 },
+]
