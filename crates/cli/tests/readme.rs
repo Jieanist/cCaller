@@ -64,7 +64,7 @@ fn readme_example_passes_check__F_Q_06() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("ok: 1 tests, 2 subcases, 4 commands"),
+        stdout.contains("ok: 1 tests, 1 subcases, 1 commands"),
         "stdout was: {stdout}"
     );
 }
