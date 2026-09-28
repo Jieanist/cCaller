@@ -850,3 +850,243 @@ fn the_gen_macro_header_compiles_as_c__F_X_05() {
     assert!(out.exists());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A hitest-style wrapper with the macro semantics of
+/// hitest/sample/export_function.h, matching the migrate example's
+/// four functions (see examples/migrate/hitest/libs.toml).
+const MIGRATE_WRAPPER: &str = r#"#include <stdint.h>
+#include <stdlib.h>
+
+#define EXPORT_FUNC(func_name, ...) \
+    int64_t Call_##func_name(uint64_t *param_page, const uint64_t *params, int64_t params_len)
+
+#define GET_INPUT_IDX(type, name, param_idx) type name = (type)param_page[params[param_idx]]
+#define GET_INPUT_IDX_NZ(type, name, param_idx) \
+    type name; do { name = (type)param_page[params[param_idx]]; if (!name) return -14; } while (0)
+#define GET_VALUE(type, name, param_idx) type name = (type)params[param_idx]
+#define SET_OUTPUT_IDX(param_idx, val) param_page[param_idx] = (uint64_t)(val)
+
+EXPORT_FUNC(malloc, len, mem_idx)
+{
+    GET_VALUE(int64_t, len, 0);
+    void *ptr = malloc((size_t)len);
+    if (!ptr) { return -4; }
+    SET_OUTPUT_IDX(1, (uint64_t)(uintptr_t)ptr);
+    return 0;
+}
+
+EXPORT_FUNC(write32, addr_idx, off, val)
+{
+    GET_INPUT_IDX(uint8_t *, addr, 0);
+    GET_VALUE(int64_t, off, 1);
+    GET_VALUE(uint32_t, val, 2);
+    *(uint32_t *)(addr + off) = val;
+    return 0;
+}
+
+EXPORT_FUNC(read32, addr_idx, off)
+{
+    GET_INPUT_IDX(const uint8_t *, addr, 0);
+    GET_VALUE(int64_t, off, 1);
+    return (int64_t)*(const uint32_t *)(addr + off);
+}
+
+EXPORT_FUNC(free, mem_idx)
+{
+    GET_INPUT_IDX_NZ(void *, mem, 0);
+    free(mem);
+    return 0;
+}
+"#;
+
+/// The migrate example corpus (committed by the validator).
+fn migrate_corpus(kind: &str, name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/migrate")
+        .join(kind)
+        .join(name)
+}
+
+#[test]
+fn migrate_round_trips_the_committed_example__F_X_06() {
+    let dir = std::env::temp_dir().join("ccaller-cli-migrate");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let wrapper = dir.join("wrapper.c");
+    std::fs::write(&wrapper, MIGRATE_WRAPPER).unwrap();
+    let out = dir.join("out");
+    let output = ccaller()
+        .arg("migrate")
+        .arg(migrate_corpus("hitest", "libs.toml"))
+        .arg(migrate_corpus("hitest", "cases.toml"))
+        .arg("--wrapper")
+        .arg(&wrapper)
+        .arg("-o")
+        .arg(&out)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0), "output: {output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("migrated 1 test(s), 4 function(s)"),
+        "stdout was: {stdout}"
+    );
+    assert!(out.join("libs.toml").exists());
+    assert!(out.join("cases.toml").exists());
+
+    // The generated pair is a drop-in for the committed expected one.
+    let check = ccaller()
+        .arg("-t")
+        .arg(out.join("cases.toml"))
+        .arg("-i")
+        .arg(out.join("libs.toml"))
+        .arg("check")
+        .output()
+        .unwrap();
+    assert_eq!(check.status.code(), Some(0), "check: {check:?}");
+    let stdout = String::from_utf8_lossy(&check.stdout);
+    assert!(
+        stdout.contains("ok: 1 tests, 3 subcases, 15 commands"),
+        "stdout was: {stdout}"
+    );
+    // ...and reports exactly what the committed expected pair reports.
+    let expected_check = ccaller()
+        .arg("-t")
+        .arg(migrate_corpus("ccaller", "cases.toml"))
+        .arg("-i")
+        .arg(migrate_corpus("ccaller", "libs.toml"))
+        .arg("check")
+        .output()
+        .unwrap();
+    assert_eq!(expected_check.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8_lossy(&check.stdout),
+        String::from_utf8_lossy(&expected_check.stdout)
+    );
+
+    // Field-level alignment with the committed expected output.
+    let libs = std::fs::read_to_string(out.join("libs.toml")).unwrap();
+    let expected_libs = std::fs::read_to_string(migrate_corpus("ccaller", "libs.toml")).unwrap();
+    // The path is the one difference: the committed file points at the
+    // runnable library by hand; migration keeps the hitest path.
+    assert!(libs.contains("path = \"libmalloc.so\""), "libs: {libs}");
+    for name in ["Call_malloc", "Call_write32", "Call_read32", "Call_free"] {
+        // The hand-written file aligns columns; compare token-wise.
+        assert_eq!(
+            funcs_line(&libs, name),
+            funcs_line(&expected_libs, name),
+            "function lines differ for {name}"
+        );
+    }
+
+    let cases = std::fs::read_to_string(out.join("cases.toml")).unwrap();
+    assert!(
+        cases.contains("debug_test = [\"test_rw_u32\"]"),
+        "cases: {cases}"
+    );
+    // The written files are pure cCaller text: no "hitest" mention in
+    // any casing and no comments at all (like `gen` output).
+    for text in [&libs, &cases] {
+        assert!(
+            !text.to_lowercase().contains("hitest"),
+            "output mentions hitest: {text}"
+        );
+        assert!(
+            !text.lines().any(|line| line.trim_start().starts_with('#')),
+            "output contains comments: {text}"
+        );
+    }
+    assert!(cases.contains("val = [888]"), "cases: {cases}");
+    assert!(cases.contains("expect_ne = 0"), "cases: {cases}");
+    assert!(
+        cases.contains("name = \"ipt1\"\nargs = { write_val = 888 }"),
+        "cases: {cases}"
+    );
+    // The group-level hitest flags map onto the M4 InputGroup
+    // overrides (the committed expected file omits them on purpose).
+    assert!(
+        cases.contains("name = \"ipt2\"\nbreak_if_fail = false"),
+        "cases: {cases}"
+    );
+    assert!(
+        cases.contains("name = \"ipt3\"\nshould_panic = true"),
+        "cases: {cases}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The one function-declaration line of a generated libs.toml, with
+/// runs of whitespace collapsed (the hand-written expected file aligns
+/// its columns).
+fn funcs_line(libs: &str, name: &str) -> String {
+    libs.lines()
+        .find(|line| line.contains(name))
+        .unwrap()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+#[test]
+fn migrate_without_a_wrapper_warns_about_slot_roles__F_X_06() {
+    let dir = std::env::temp_dir().join("ccaller-cli-migrate-nowrap");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let output = ccaller()
+        .arg("migrate")
+        .arg(migrate_corpus("hitest", "libs.toml"))
+        .arg(migrate_corpus("hitest", "cases.toml"))
+        .arg("-o")
+        .arg(&dir)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0), "output: {output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("slot_roles cannot be inferred"),
+        "stderr was: {stderr}"
+    );
+    // The wrapper-side advisories print on every migration.
+    assert!(
+        stderr.contains("must be recompiled"),
+        "stderr was: {stderr}"
+    );
+    assert!(stderr.contains("[-127, -1]"), "stderr was: {stderr}");
+    let libs = std::fs::read_to_string(dir.join("libs.toml")).unwrap();
+    assert!(!libs.contains("slot_roles"), "libs: {libs}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn migrate_reports_errors_with_locations__F_X_06() {
+    let dir = std::env::temp_dir().join("ccaller-cli-migrate-errors");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    // Unreadable input.
+    let output = ccaller()
+        .arg("migrate")
+        .arg(dir.join("missing.toml"))
+        .arg(migrate_corpus("hitest", "cases.toml"))
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("failed to read"), "stderr was: {stderr}");
+
+    // Unparseable hitest TOML, with the file and a location.
+    let bad = dir.join("bad.toml");
+    std::fs::write(&bad, "debug_test = \n").unwrap();
+    let output = ccaller()
+        .arg("migrate")
+        .arg(migrate_corpus("hitest", "libs.toml"))
+        .arg(&bad)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("bad.toml:1:") && stderr.contains("error: "),
+        "stderr was: {stderr}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

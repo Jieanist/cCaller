@@ -154,7 +154,7 @@ fn render(funcs: &[GenFunc], lib_path: &str) -> String {
 /// Both bytes become spaces so every later offset stays valid; after
 /// splicing, each physical line is a logical line, and a `//` comment
 /// or directive covers its continuations naturally.
-fn splice_lines(source: &str) -> String {
+pub(super) fn splice_lines(source: &str) -> String {
     let mut out = source.as_bytes().to_vec();
     let mut index = 0;
     while index < out.len() {
@@ -187,7 +187,7 @@ fn splice_lines(source: &str) -> String {
 /// inside a comment is blanked byte-for-byte, which can shift the
 /// reported column of constructs after it by a few columns; that is
 /// accepted for diagnostics only.
-fn strip_comments(source: &str) -> String {
+pub(super) fn strip_comments(source: &str) -> String {
     #[derive(Clone, Copy, PartialEq, Eq)]
     enum State {
         Normal,
@@ -520,7 +520,7 @@ type LineRanges = Vec<(usize, usize)>;
 /// Returns the byte ranges of inactive lines (inside conditional arms
 /// of other platforms) and of directive lines (anything starting with
 /// `#`).
-fn classify_lines(text: &str) -> (LineRanges, LineRanges) {
+pub(super) fn classify_lines(text: &str) -> (LineRanges, LineRanges) {
     let mut inactive = Vec::new();
     let mut directives = Vec::new();
     let mut stack: Vec<CondArm> = Vec::new();

@@ -25,6 +25,7 @@ pub mod fmt;
 pub mod gen;
 pub mod layers;
 pub mod lib_desc;
+pub mod migrate;
 pub mod source;
 pub mod validate;
 pub mod value;
@@ -46,6 +47,7 @@ pub use lib_desc::{
     validate as validate_lib_description, FuncDecl, LibDescription, LibEntry, SlotRole,
     SUPPORTED_VERSION,
 };
+pub use migrate::{migrate, MigrateError, MigrateSource, MigrationOutput};
 pub use source::SourceDoc;
 pub use validate::validate_cases;
 pub use value::{

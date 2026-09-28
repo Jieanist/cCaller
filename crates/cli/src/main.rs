@@ -29,8 +29,8 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use ccaller_core::config::{
-    default_lib_filename, generate_lib_description, normalize_toml, run_check, run_expand,
-    CheckReport, ExpandReport,
+    default_lib_filename, generate_lib_description, migrate as migrate_configs, normalize_toml,
+    run_check, run_expand, CheckReport, ExpandReport,
 };
 use ccaller_core::death::DeathIsolation;
 use ccaller_core::error::CoreError;
@@ -136,6 +136,21 @@ enum Sub {
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
+    /// Migrate hitest-style configuration files to cCaller
+    /// configuration files.
+    Migrate {
+        /// hitest-style library description (libs.toml).
+        libs: PathBuf,
+        /// hitest-style case configuration (cases.toml).
+        cases: PathBuf,
+        /// Output directory for the cCaller files; defaults to `.`.
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        /// hitest wrapper source, scanned to infer slot_roles
+        /// (GET_INPUT_IDX/SET_OUTPUT_IDX macros).
+        #[arg(long)]
+        wrapper: Option<PathBuf>,
+    },
 }
 
 /// Output format of `check` and `run` (requirement spec 7.6).
@@ -200,6 +215,12 @@ fn main() -> std::process::ExitCode {
         Sub::Init { dir, build_sh } => init(dir.unwrap_or_else(|| PathBuf::from(".")), build_sh),
         Sub::Fmt { file, in_place } => fmt(file.or(cli.test), in_place),
         Sub::Gen { source, output } => gen(source, output),
+        Sub::Migrate {
+            libs,
+            cases,
+            output,
+            wrapper,
+        } => migrate(libs, cases, output, wrapper),
     }
 }
 
@@ -576,6 +597,109 @@ fn gen(source: PathBuf, output: Option<PathBuf>) -> std::process::ExitCode {
         "generated {} function(s) for `{lib_path}` -> {}",
         report.func_count,
         target.display()
+    );
+    std::process::ExitCode::from(exit_code::ExitCode::Success as u8)
+}
+
+/// Runs the `migrate` subcommand (hitest → cCaller configuration).
+///
+/// An independent generator: neither `--test` nor `--lib`
+/// participates. Writes `<output>/libs.toml` and `<output>/cases.toml`
+/// (overwriting, like `gen` — regeneration is the tool's point). The
+/// wrapper-side recompile advisories always print to stderr; data-driven
+/// warnings (missing slot_roles inference, hitest `ref_inputs`) come
+/// from the core migration. Exit codes (FR-X-02): 0 on success, 2 when
+/// an input is unreadable, unmigratable, or the output cannot be
+/// written.
+fn migrate(
+    libs: PathBuf,
+    cases: PathBuf,
+    output: Option<PathBuf>,
+    wrapper: Option<PathBuf>,
+) -> std::process::ExitCode {
+    let config_error = || std::process::ExitCode::from(exit_code::ExitCode::ConfigError as u8);
+    let libs_text = match std::fs::read_to_string(&libs) {
+        Ok(text) => text,
+        Err(error) => {
+            eprintln!("error: failed to read `{}`: {error}", libs.display());
+            return config_error();
+        }
+    };
+    let cases_text = match std::fs::read_to_string(&cases) {
+        Ok(text) => text,
+        Err(error) => {
+            eprintln!("error: failed to read `{}`: {error}", cases.display());
+            return config_error();
+        }
+    };
+    let wrapper_text = match wrapper.as_ref().map(std::fs::read_to_string) {
+        None => None,
+        Some(Ok(text)) => Some(text),
+        Some(Err(error)) => {
+            eprintln!(
+                "error: failed to read `{}`: {error}",
+                wrapper
+                    .as_ref()
+                    .map_or_else(|| "?".to_owned(), |path| path.display().to_string())
+            );
+            return config_error();
+        }
+    };
+
+    // Wrapper-side truths of every hitest → cCaller move (README §1).
+    eprintln!(
+        "warning: the wrapper must be recompiled for cCaller: `params` is now \
+         `const int64_t *` (signed) and `CCaller_abi_version` must be exported"
+    );
+    eprintln!(
+        "warning: wrapper-custom failure codes must converge into [-127, -1]; \
+         [-255, -128] is framework-reserved"
+    );
+
+    let migration = match migrate_configs(&libs_text, &cases_text, wrapper_text.as_deref()) {
+        Ok(migration) => migration,
+        Err(error) => {
+            let origin = match error.source {
+                ccaller_core::config::MigrateSource::Libs => libs.display().to_string(),
+                ccaller_core::config::MigrateSource::Cases => cases.display().to_string(),
+                ccaller_core::config::MigrateSource::Output => output
+                    .clone()
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .display()
+                    .to_string(),
+            };
+            eprintln!(
+                "error: {origin}:{}:{}: {}",
+                error.line, error.column, error.message
+            );
+            return config_error();
+        }
+    };
+    for warning in &migration.warnings {
+        eprintln!("warning: {warning}");
+    }
+    let dir = output.unwrap_or_else(|| PathBuf::from("."));
+    if let Err(error) = std::fs::create_dir_all(&dir) {
+        eprintln!("error: failed to create `{}`: {error}", dir.display());
+        return config_error();
+    }
+    let libs_out = dir.join("libs.toml");
+    let cases_out = dir.join("cases.toml");
+    for (path, content) in [
+        (&libs_out, &migration.libs_toml),
+        (&cases_out, &migration.cases_toml),
+    ] {
+        if let Err(error) = std::fs::write(path, content) {
+            eprintln!("error: failed to write `{}`: {error}", path.display());
+            return config_error();
+        }
+    }
+    println!(
+        "migrated {} test(s), {} function(s) -> {}, {}",
+        migration.test_count,
+        migration.func_count,
+        libs_out.display(),
+        cases_out.display()
     );
     std::process::ExitCode::from(exit_code::ExitCode::Success as u8)
 }
