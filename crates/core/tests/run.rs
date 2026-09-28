@@ -293,8 +293,8 @@ fn global_env_runs_once_per_test_not_per_subcase__F_E_02() {
 }
 
 #[test]
-fn env_layer_order_is_process_global_case_thread__Q_13() {
-    // Q-13: entry order process, global, case, thread with exits reversed.
+fn env_layer_order_is_process_global_thread_case__Q_13() {
+    // Q-13: entry order process, global, thread, case with exits reversed.
     // Each env phase and the test body consumes the tick counter in that
     // exact order, so any reordering fails an expectation. This is the
     // runtime twin of the def-use order test.
@@ -306,11 +306,11 @@ fn env_layer_order_is_process_global_case_thread__Q_13() {
                  exit = [{ opfunc = \"Call_tick\", expect_eq = 8 }]\n\n\
                  [env]\ninit = [{ opfunc = \"Call_tick\", expect_eq = 1 }]\n\
                  exit = [{ opfunc = \"Call_tick\", expect_eq = 7 }]\n\n\
-                 [thread_env]\ninit = [{ opfunc = \"Call_tick\", expect_eq = 3 }]\n\
-                 exit = [{ opfunc = \"Call_tick\", expect_eq = 5 }]\n\n\
+                 [thread_env]\ninit = [{ opfunc = \"Call_tick\", expect_eq = 2 }]\n\
+                 exit = [{ opfunc = \"Call_tick\", expect_eq = 6 }]\n\n\
                  [[envs]]\nname = \"e\"\n\
-                 init = [{ opfunc = \"Call_tick\", expect_eq = 2 }]\n\
-                 exit = [{ opfunc = \"Call_tick\", expect_eq = 6 }]\n\
+                 init = [{ opfunc = \"Call_tick\", expect_eq = 3 }]\n\
+                 exit = [{ opfunc = \"Call_tick\", expect_eq = 5 }]\n\
                  tests = [\"t\"]\n\n\
                  [[tests]]\nname = \"t\"\ncmds = [\n\
                  \x20 { opfunc = \"Call_tick\", expect_eq = 4 },\n]\n";

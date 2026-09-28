@@ -80,7 +80,7 @@ pub fn analyze_def_use(
 
         // The prefix and suffix are the same for every sub-case of the
         // test; only the test commands vary (their `$var` bindings).
-        // Entering order: process, global, case, thread (FR-E-02); the
+        // Entering order: process, global, thread, case (FR-E-02); the
         // exit order is the reverse.
         let mut prefix = Vec::new();
         let mut suffix = Vec::new();

@@ -28,14 +28,14 @@ pub enum EnvScope {
 /// Entry order of the four env scopes (Q-13): process, global, case,
 /// thread.
 ///
-/// Exit phases run in the reverse order: thread, case, global, process.
+/// Exit phases run in the reverse order: case, thread, global, process.
 /// The def-use analysis walks this exact order for the entry prefix and
 /// its reverse for the exit suffix; the runtime does the same.
 pub const ENTRY_ORDER: [EnvScope; 4] = [
     EnvScope::Process,
     EnvScope::Global,
-    EnvScope::Case,
     EnvScope::Thread,
+    EnvScope::Case,
 ];
 
 #[cfg(test)]
@@ -43,7 +43,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn entry_order_is_process_global_case_thread__F_E_02() {
+    fn entry_order_is_process_global_thread_case__F_E_02() {
         // This is the single source of truth that both the def-use
         // analysis and the runtime consume; pinning it here prevents the
         // two from drifting apart again (decision Q-13).
@@ -52,8 +52,8 @@ mod tests {
             [
                 EnvScope::Process,
                 EnvScope::Global,
-                EnvScope::Case,
                 EnvScope::Thread,
+                EnvScope::Case,
             ]
         );
     }

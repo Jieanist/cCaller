@@ -24,7 +24,7 @@
 //! parallel test the first worker's final page is absorbed back. Each
 //! worker starts from a copy of the page it inherits, so every
 //! execution observes the analyzer's per-sub-case prefix (process,
-//! global, case, thread inits — Q-13) and no execution can observe
+//! global, thread, case inits — Q-13) and no execution can observe
 //! another thread's writes.
 //!
 //! Death tests (`should_panic`, FR-T-05) execute in isolated child
@@ -847,7 +847,7 @@ fn run_framed_executions(
     let mut perf: Vec<PerfSample> = Vec::new();
     let mut skipped = 0usize;
 
-    // Enter the test-level scopes (case, thread) in entry order.
+    // Enter the test-level scopes (thread, case) in entry order.
     let mut init_failures: Vec<String> = Vec::new();
     let mut entered: Vec<EnvScope> = Vec::new();
     for &scope in test_scopes() {
