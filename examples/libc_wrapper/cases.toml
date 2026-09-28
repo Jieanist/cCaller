@@ -143,7 +143,9 @@ cmds = [
   { opfunc = "Call_strlen", expect_ge = 3,  args = ["str='abcd'"] },
 ]
 
-# thread_num > 1 plus a read_write slot (fetch_add); perf is a no-op today.
+# thread_num > 1 plus a read_write slot (fetch_add); the M3 executor spreads
+# the 4 replicas over 4 worker threads, each owning its own param_page, and
+# `perf = true` times the fetch_add (reported via --format json/junit).
 [[tests]]
 name = "t_threaded_counter"
 thread_num = 4
@@ -154,8 +156,10 @@ cmds = [
   { opfunc = "Call_fetch_add", expect_eq = 2, args = ["slot_idx=20", "delta=1"] },
 ]
 
-# Death test: the M2 executor skips should_panic tests wholesale; M3 will
-# isolate them in a subprocess and observe the abort as the expected death.
+# Death test: the M3 executor isolates should_panic tests in a subprocess
+# and observes the abort (SIGABRT) as the expected death. The `expect_eq = 0`
+# below is a schema-required placeholder: the child aborts before returning,
+# so the verdict comes from the child's signal, never from this assertion.
 [[tests]]
 name = "t_death_abort"
 should_panic = true
