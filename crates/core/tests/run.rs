@@ -16,7 +16,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use ccaller_core::{
     execute, CaseStatus, ConsoleReporter, DeathLauncher, DeathTestRequest, IsolationTarget,
@@ -188,6 +188,24 @@ fn death_child_harness__internal() {
         Ok(report) => eprintln!("death child completed: {:?}", report.summary),
         Err(error) => eprintln!("death child failed to run: {error}"),
     }
+}
+
+/// The in-child half of the timeout test: run the requested config without
+/// death isolation. When a command overstays its `timeout`, the watchdog
+/// exits the whole child with code 1; reaching the end of `execute` means
+/// the watchdog never fired, which the parent treats as a failure.
+#[test]
+fn timeout_child_harness__internal() {
+    let (Ok(lib), Ok(cases)) = (std::env::var(HARNESS_LIB), std::env::var(HARNESS_CASES)) else {
+        return;
+    };
+    let reporter = ConsoleReporter::new(io::stderr());
+    let _ = execute(
+        Path::new(&lib),
+        Path::new(&cases),
+        RunOptions::default(),
+        Box::new(reporter),
+    );
 }
 
 /// Runs a death test through the child-isolation path with a short
@@ -693,6 +711,58 @@ fn a_hanging_death_test_times_out_and_fails__F_T_05() {
         failures[0].reason.as_deref().unwrap_or("").contains("hung"),
         "reason was: {:?}",
         failures[0].reason
+    );
+}
+
+#[test]
+fn a_command_overstaying_its_timeout_exits_the_process__F_X_03() {
+    // FR-X-03: a command that never returns (the wrapper sleeps 30s) must
+    // be cut off by the watchdog at its 1s budget, reporting the stuck
+    // wrapper/driver and exiting with code 1 (TestFailed) so a CI machine
+    // is not held hostage.
+    let fixture = build_fixture();
+    let seq = DIR_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let dir = std::env::temp_dir().join(format!("ccaller-timeout-{}-{seq}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let libs = LIBS_HEADER.replace("{lib}", &toml_path(&fixture));
+    let lib_path = write_config(&dir, "libs.toml", &libs);
+    let cases = "version = 1\n\n\
+                 [[tests]]\nname = \"t_hang\"\ncmds = [\n\
+                 \x20 { opfunc = \"Call_hang\", expect_eq = 0, timeout = 1 },\n]\n";
+    let cases_path = write_config(&dir, "cases.toml", cases);
+
+    let started = Instant::now();
+    let output = Command::new(std::env::current_exe().unwrap())
+        .arg("timeout_child_harness__internal")
+        .arg("--exact")
+        .arg("--nocapture")
+        .env(HARNESS_LIB, &lib_path)
+        .env(HARNESS_CASES, &cases_path)
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("spawning the timeout child must succeed");
+
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "the watchdog must exit with TestFailed (1), not {:?}",
+        output.status.code()
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("TIMEOUT"),
+        "stderr should flag the timeout:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("Call_hang"),
+        "stderr should name the stuck command:\n{stderr}"
+    );
+    // The 1s budget must fire long before Call_hang's 30s sleep ends.
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "the watchdog fired too slowly: {:?}",
+        started.elapsed()
     );
 }
 

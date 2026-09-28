@@ -15,6 +15,11 @@ use toml::Spanned;
 
 use super::value::ScalarRaw;
 
+/// Default per-command timeout in seconds (FR-X-03); `0` disables the
+/// watchdog for that command. Every `Call_<name>` invocation - test command
+/// and env init/exit alike - gets this budget unless a command overrides it.
+pub const DEFAULT_TIMEOUT_SECS: u64 = 60;
+
 /// Root of a test case configuration file.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -127,6 +132,9 @@ pub struct CmdDef {
     pub args: Vec<Spanned<String>>,
     /// Record the duration of this call (FR-P-01, M3).
     pub perf: bool,
+    /// Per-command timeout in seconds (FR-X-03); `0` disables the watchdog
+    /// for this command, otherwise defaults to [`DEFAULT_TIMEOUT_SECS`].
+    pub timeout: u64,
     /// Every `expect_*` field's value, keyed by its TOML name and carrying
     /// the value span. Registered names route to the assertion registry;
     /// unregistered `expect_*` names are unknown fields.
@@ -185,6 +193,7 @@ impl<'de> Visitor<'de> for CmdVisitor {
         let mut opfunc = None;
         let mut args = Vec::new();
         let mut perf = false;
+        let mut timeout = DEFAULT_TIMEOUT_SECS;
         let mut expectations = BTreeMap::new();
         let mut stray_fields = BTreeMap::new();
 
@@ -193,6 +202,7 @@ impl<'de> Visitor<'de> for CmdVisitor {
                 "opfunc" => opfunc = Some(map.next_value::<Spanned<String>>()?),
                 "args" => args = map.next_value::<Vec<Spanned<String>>>()?,
                 "perf" => perf = map.next_value::<bool>()?,
+                "timeout" => timeout = map.next_value::<u64>()?,
                 expect_key if expect_key.starts_with("expect_") => {
                     let value = map.next_value::<Spanned<ScalarRaw>>()?;
                     expectations.insert(expect_key.to_string(), value);
@@ -211,6 +221,7 @@ impl<'de> Visitor<'de> for CmdVisitor {
             opfunc,
             args,
             perf,
+            timeout,
             expectations,
             stray_fields,
         })
@@ -388,6 +399,25 @@ tests = ["test_sock"]                 # referenced tests no longer run standalon
         assert!(test.serial.is_none());
         assert!(test.inputs.is_empty());
         assert!(!config.default_serial);
+    }
+
+    #[test]
+    fn cmd_timeout_defaults_to_sixty_and_is_overridable__F_X_03() {
+        let config = parse(
+            "version = 1\n\
+             [[tests]]\n\
+             name = \"t\"\n\
+             cmds = [\n\
+               { opfunc = \"Call_a\", expect_eq = 0 },\n\
+               { opfunc = \"Call_b\", expect_eq = 0, timeout = 5 },\n\
+               { opfunc = \"Call_c\", expect_eq = 0, timeout = 0 },\n\
+             ]\n",
+        )
+        .unwrap();
+        let cmds = &config.tests[0].get_ref().cmds;
+        assert_eq!(cmds[0].get_ref().timeout, DEFAULT_TIMEOUT_SECS);
+        assert_eq!(cmds[1].get_ref().timeout, 5);
+        assert_eq!(cmds[2].get_ref().timeout, 0);
     }
 
     #[test]

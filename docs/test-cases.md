@@ -65,6 +65,10 @@ refs = ["common"]
 - 断言（互斥，六选一）：`expect_eq` / `expect_ne` / `expect_ge` / `expect_gt` / `expect_le` / `expect_lt`。
   取反折叠：`!expect_ge → expect_lt`、`!expect_gt → expect_le`。
 - `perf = true`：记录本次调用耗时（报告里 `duration_ns`）。
+- `timeout`：本次调用的超时秒数，默认 `60`；设为 `0` 表示不限时。某条命令超过预算仍不返回时，
+  cCaller 的 watchdog 会认定是 wrapper/驱动卡死（FFI 调用未返回），向 stderr 打印诊断并以退出码
+  `1`（用例失败）退出进程，避免 CI 机器被无限占用。适用于 `cmds[]`、`env`/`thread_env`/`process_env`
+  的 `init`/`exit` 里所有命令。
 
 ### 输入组 `inputs[]`
 

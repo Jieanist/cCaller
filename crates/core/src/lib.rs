@@ -27,6 +27,7 @@ pub mod plan;
 pub mod report;
 pub mod run;
 pub mod runtime;
+mod watchdog;
 
 pub use death::{
     isolate_child, DeathIsolation, DeathLauncher, DeathOutcome, DeathTestRequest,

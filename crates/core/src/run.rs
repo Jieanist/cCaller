@@ -238,6 +238,13 @@ impl Runner {
             options,
         };
 
+        // FR-X-03: arm the timeout watchdog for the whole run; it exits the
+        // process when a command overstays its budget, and is signalled to
+        // stop when this scope (and the guard) drops on normal completion.
+        let _watchdog = crate::watchdog::Watchdog::start().map_err(|error| {
+            RunError::Internal(format!("failed to start the timeout watchdog: {error}"))
+        })?;
+
         let mut summary = RunSummary::default();
         let mut cases: Vec<CaseOutcome> = Vec::new();
         let mut perf: Vec<PerfSample> = Vec::new();
@@ -1090,7 +1097,13 @@ fn run_cmd(
         Err(error) => return CmdResult::Failed(format!("argument error: {error}")),
     };
     let started = Instant::now();
-    let code = call::invoke(func.call, page, &args);
+    // FR-X-03: the watchdog brackets only the wrapper call itself —
+    // marshalling and classification are framework work that cannot block
+    // on the device, so they sit outside the per-command budget.
+    let code = {
+        let _watch = crate::watchdog::begin(&cmd.opfunc, cmd.timeout);
+        call::invoke(func.call, page, &args)
+    };
     let duration = started.elapsed();
     if cmd.perf {
         let context = format!("{display} cmd {index}");

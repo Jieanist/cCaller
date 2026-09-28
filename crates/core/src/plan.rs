@@ -356,6 +356,7 @@ fn resolve_env_cmds(
             args,
             expect,
             perf: cmd.perf,
+            timeout: cmd.timeout,
         });
     }
     Ok(resolved)

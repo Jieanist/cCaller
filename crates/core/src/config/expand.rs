@@ -72,6 +72,8 @@ pub struct ResolvedCmd {
     pub expect: Option<ResolvedExpectation>,
     /// Whether the executor records this call's duration (FR-P-01).
     pub perf: bool,
+    /// Per-command timeout in seconds; `0` disables the watchdog (FR-X-03).
+    pub timeout: u64,
 }
 
 /// One concrete sub-case of a test (FR-C-05).
@@ -645,6 +647,7 @@ fn resolve_cmds(
             args,
             expect,
             perf: cmd.perf,
+            timeout: cmd.timeout,
         });
     }
 
