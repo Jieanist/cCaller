@@ -523,3 +523,330 @@ fn fmt_defaults_to_the_test_flag_value__F_X_04() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.starts_with("version = 1\n"), "stdout was: {stdout}");
 }
+
+/// A wrapper written the `gen` way: the 22 functions of the committed
+/// examples/libc_wrapper description, declared through CCALLER_FUNC,
+/// plus the decoys (comments, strings, foreign-platform blocks) the
+/// scanner must skip.
+const GEN_SAMPLE: &str = r#"#include <stdlib.h>
+
+#include "ccaller_gen.h"
+
+int64_t CCaller_abi_version(void) {
+    return CCALLER_ABI_VERSION;
+}
+
+/* ---- memory management ---- */
+
+CCALLER_FUNC(malloc, len, mem_idx:write)
+{
+    (void)param_page; (void)params; (void)param_len;
+    return 0;
+}
+
+CCALLER_FUNC(free, mem_idx:read)
+{
+    return 0;
+}
+
+// A comment mentioning CCALLER_FUNC(hidden, ghost:read) must not count.
+
+/* A block comment with CCALLER_FUNC(also_hidden, x:read) inside. */
+
+static const char *kNeedle = "CCALLER_FUNC(in_string, x)";
+
+CCALLER_FUNC(memcpy, dst_idx:read, src_idx:read, len)
+{
+    return 0;
+}
+
+CCALLER_FUNC(memset, dst_idx:read, val, len)
+{
+    return 0;
+}
+
+CCALLER_FUNC(memcmp, dst_idx:read, dst_off, src_idx:read, src_off, len)
+{
+    return 0;
+}
+
+CCALLER_FUNC(read8, addr_idx:read, off)
+{
+    return 0;
+}
+
+CCALLER_FUNC(read16, addr_idx:read, off)
+{
+    return 0;
+}
+
+CCALLER_FUNC(read32, addr_idx:read, off)
+{
+    return 0;
+}
+
+CCALLER_FUNC(read64, addr_idx:read, off)
+{
+    return 0;
+}
+
+CCALLER_FUNC(write8, addr_idx:read, off, val)
+{
+    return 0;
+}
+
+CCALLER_FUNC(write16, addr_idx:read, off, val)
+{
+    return 0;
+}
+
+CCALLER_FUNC(write32, addr_idx:read, off, val)
+{
+    return 0;
+}
+
+CCALLER_FUNC(write64, addr_idx:read, off, val)
+{
+    return 0;
+}
+
+CCALLER_FUNC(strlen, str)
+{
+    return 0;
+}
+
+CCALLER_FUNC(atoi, str)
+{
+    return 0;
+}
+
+CCALLER_FUNC(strcmp, str1, str2)
+{
+    return 0;
+}
+
+CCALLER_FUNC(strncpy, dst_idx:read, str, len)
+{
+    return 0;
+}
+
+CCALLER_FUNC(add, a, b)
+{
+    return 0;
+}
+
+CCALLER_FUNC(store, slot_idx:write, val)
+{
+    return 0;
+}
+
+CCALLER_FUNC(fetch_add, slot_idx:read_write, delta)
+{
+    return 0;
+}
+
+CCALLER_FUNC(skip)
+{
+    return CCALLER_ERR_SKIP;
+}
+
+CCALLER_FUNC(abort)
+{
+    abort();
+    return 0;
+}
+
+#ifdef __APPLE__
+CCALLER_FUNC(apple_only, never:read)
+{
+    return 0;
+}
+#endif
+
+#if defined(__linux__) || defined(_WIN32)
+CCALLER_FUNC(unix_or_windows, p:read_write)
+{
+    return 0;
+}
+#endif
+
+#if 0
+CCALLER_FUNC(dead_code, x)
+{
+    return 0;
+}
+#endif
+"#;
+
+/// Writes the sample into `dir` and returns its path.
+fn write_gen_sample(dir: &Path) -> PathBuf {
+    let source = dir.join("libc_wrapper.c");
+    std::fs::write(&source, GEN_SAMPLE).unwrap();
+    source
+}
+
+#[test]
+fn gen_writes_libs_toml_from_wrapper_source__F_X_05() {
+    let dir = std::env::temp_dir().join("ccaller-cli-gen");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let source = write_gen_sample(&dir);
+    let output = Command::new(env!("CARGO_BIN_EXE_ccaller"))
+        .current_dir(&dir)
+        .arg("gen")
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0), "output: {output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("generated 23 function(s)"),
+        "stdout was: {stdout}"
+    );
+    let libs = dir.join("libs.toml");
+    let text = std::fs::read_to_string(&libs).unwrap();
+    assert!(text.contains("path = \"libc_wrapper.so\""), "text: {text}");
+    for name in ["Call_malloc", "Call_read32", "Call_fetch_add", "Call_abort"] {
+        assert!(text.contains(&format!("name = \"{name}\"")), "text: {text}");
+    }
+    assert!(
+        text.contains("paras = [\"len\", \"mem_idx\"], slot_roles = { mem_idx = \"write\" }"),
+        "text: {text}"
+    );
+    assert!(
+        text.contains("slot_roles = { slot_idx = \"read_write\" }"),
+        "text: {text}"
+    );
+    // The decoys never make it into the description.
+    for name in [
+        "Call_hidden",
+        "Call_also_hidden",
+        "Call_in_string",
+        "Call_apple_only",
+        "Call_dead_code",
+    ] {
+        assert!(text.find(name).is_none(), "{name} leaked into: {text}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn gen_honors_the_output_flag_and_reports_errors__F_X_05() {
+    let dir = std::env::temp_dir().join("ccaller-cli-gen-flags");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let source = write_gen_sample(&dir);
+    let custom = dir.join("elsewhere").join("my_libs.toml");
+    std::fs::create_dir_all(custom.parent().unwrap()).unwrap();
+    let output = ccaller()
+        .arg("gen")
+        .arg(&source)
+        .arg("-o")
+        .arg(&custom)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0), "output: {output:?}");
+    assert!(custom.exists());
+    assert!(!dir.join("libs.toml").exists());
+
+    // Unreadable source.
+    let output = ccaller()
+        .arg("gen")
+        .arg(dir.join("missing.c"))
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("failed to read"), "stderr was: {stderr}");
+
+    // Bad syntax with a source location.
+    let bad = dir.join("bad.c");
+    std::fs::write(&bad, "CCALLER_FUNC(f, a:reed)\n{\n}\n").unwrap();
+    let output = ccaller().arg("gen").arg(&bad).output().unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("bad.c:1:19") && stderr.contains("unknown slot role `reed`"),
+        "stderr was: {stderr}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn gen_output_passes_check_against_the_real_cases__F_X_05() {
+    // Round-trip: the generated description is a drop-in replacement
+    // for the committed hand-written one — the real cases.toml checks
+    // clean against it.
+    let dir = std::env::temp_dir().join("ccaller-cli-gen-roundtrip");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let source = write_gen_sample(&dir);
+    let libs = dir.join("libs.toml");
+    let gen = ccaller()
+        .arg("gen")
+        .arg(&source)
+        .arg("-o")
+        .arg(&libs)
+        .output()
+        .unwrap();
+    assert_eq!(gen.status.code(), Some(0), "gen output: {gen:?}");
+    let cases =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/libc_wrapper/cases.toml");
+    let check = ccaller()
+        .arg("-t")
+        .arg(&cases)
+        .arg("-i")
+        .arg(&libs)
+        .arg("check")
+        .output()
+        .unwrap();
+    assert_eq!(
+        check.status.code(),
+        Some(0),
+        "check output: {check:?}\nstderr: {}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&check.stdout);
+    assert!(
+        stdout.contains("ok: 14 tests, 18 subcases, 77 commands"),
+        "stdout was: {stdout}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_gen_macro_header_compiles_as_c__F_X_05() {
+    // CCALLER_FUNC must be real C, not just scanner bait: compile the
+    // sample against ccaller_gen.h into a shared library. Skipped
+    // where no C compiler is installed.
+    let dir = std::env::temp_dir().join("ccaller-cli-gen-compile");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let source = write_gen_sample(&dir);
+    let include = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../crates/ffi/include");
+    let probe = Command::new("cc").arg("--version").output();
+    if probe.map(|probe| !probe.status.success()).unwrap_or(true) {
+        let _ = std::fs::remove_dir_all(&dir);
+        return;
+    }
+    let out = dir.join("libc_wrapper.so");
+    let compile = Command::new("cc")
+        .arg("--shared")
+        .arg("-fPIC")
+        .arg("-I")
+        .arg(&include)
+        .arg(&source)
+        .arg("-o")
+        .arg(&out)
+        .output()
+        .unwrap();
+    assert_eq!(
+        compile.status.code(),
+        Some(0),
+        "cc failed: {}\n{}",
+        String::from_utf8_lossy(&compile.stdout),
+        String::from_utf8_lossy(&compile.stderr)
+    );
+    assert!(out.exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}

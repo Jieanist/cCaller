@@ -10,8 +10,9 @@
 //! runs the slot def-use analysis over the expanded sub-cases (FR-C-10),
 //! [`check`] glues every stage into the 7.6 report, [`expand_report`]
 //! renders the sub-case listing of the `expand` tool, [`fmt`]
-//! normalizes a configuration file's TOML layout, and [`value`]
-//! defines the scalar grammar shared by command arguments and
+//! normalizes a configuration file's TOML layout, [`gen`] derives a
+//! library description from macro-annotated wrapper source, and
+//! [`value`] defines the scalar grammar shared by command arguments and
 //! expectation values.
 
 pub mod cases;
@@ -21,6 +22,7 @@ pub mod diag;
 pub mod expand;
 pub mod expand_report;
 pub mod fmt;
+pub mod gen;
 pub mod layers;
 pub mod lib_desc;
 pub mod source;
@@ -39,6 +41,7 @@ pub use expand::{
 };
 pub use expand_report::{run_expand, ExpandReport, ExpandedSubCase, ExpandedTest, EXPAND_SCHEMA};
 pub use fmt::{normalize_toml, FmtError};
+pub use gen::{default_lib_filename, generate_lib_description, GenError, GenReport};
 pub use lib_desc::{
     validate as validate_lib_description, FuncDecl, LibDescription, LibEntry, SlotRole,
     SUPPORTED_VERSION,

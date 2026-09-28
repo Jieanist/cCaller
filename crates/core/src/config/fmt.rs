@@ -62,7 +62,7 @@ pub fn normalize_toml(text: &str) -> Result<String, FmtError> {
 /// A multi-byte character counts as one column; the offset is clamped
 /// to the document length so a parser pointing one byte past the end
 /// (e.g. an unclosed table at EOF) still reports a real position.
-fn line_column_of(text: &str, offset: usize) -> (usize, usize) {
+pub(super) fn line_column_of(text: &str, offset: usize) -> (usize, usize) {
     let offset = offset.min(text.len());
     let mut line = 1usize;
     let mut column = 1usize;

@@ -28,7 +28,10 @@ mod logging;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use ccaller_core::config::{normalize_toml, run_check, run_expand, CheckReport, ExpandReport};
+use ccaller_core::config::{
+    default_lib_filename, generate_lib_description, normalize_toml, run_check, run_expand,
+    CheckReport, ExpandReport,
+};
 use ccaller_core::death::DeathIsolation;
 use ccaller_core::error::CoreError;
 use ccaller_core::{
@@ -123,6 +126,16 @@ enum Sub {
         #[arg(long)]
         in_place: bool,
     },
+    /// Generate a library description from macro-annotated wrapper
+    /// source (`CCALLER_FUNC`; see crates/ffi/include/ccaller_gen.h).
+    Gen {
+        /// C source file declaring functions with CCALLER_FUNC.
+        source: PathBuf,
+        /// Output file for the generated description; defaults to
+        /// ./libs.toml.
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
 }
 
 /// Output format of `check` and `run` (requirement spec 7.6).
@@ -186,6 +199,7 @@ fn main() -> std::process::ExitCode {
         Sub::Expand { format } => expand(cli.test.as_deref(), cli.lib.as_deref(), format),
         Sub::Init { dir, build_sh } => init(dir.unwrap_or_else(|| PathBuf::from(".")), build_sh),
         Sub::Fmt { file, in_place } => fmt(file.or(cli.test), in_place),
+        Sub::Gen { source, output } => gen(source, output),
     }
 }
 
@@ -521,5 +535,47 @@ fn fmt(file: Option<PathBuf>, in_place: bool) -> std::process::ExitCode {
     } else {
         print!("{normalized}");
     }
+    std::process::ExitCode::from(exit_code::ExitCode::Success as u8)
+}
+
+/// Runs the `gen` subcommand (wrapper source → library description).
+///
+/// An independent generator: neither `--test` nor `--lib` participates.
+/// The library path inside the description follows the source file's
+/// stem and the platform extension (`init` convention); `-o` names the
+/// output file, defaulting to ./libs.toml, which is overwritten —
+/// regeneration is the tool's point. Exit codes (FR-X-02): 0 on
+/// success, 2 when the source is unreadable, unscannable, or the
+/// output cannot be written.
+fn gen(source: PathBuf, output: Option<PathBuf>) -> std::process::ExitCode {
+    let text = match std::fs::read_to_string(&source) {
+        Ok(text) => text,
+        Err(error) => {
+            eprintln!("error: failed to read `{}`: {error}", source.display());
+            return std::process::ExitCode::from(exit_code::ExitCode::ConfigError as u8);
+        }
+    };
+    let stem = source
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("wrapper");
+    let lib_path = default_lib_filename(stem);
+    let report = match generate_lib_description(&text, &lib_path) {
+        Ok(report) => report,
+        Err(error) => {
+            eprintln!("error: {}:{error}", source.display());
+            return std::process::ExitCode::from(exit_code::ExitCode::ConfigError as u8);
+        }
+    };
+    let target = output.unwrap_or_else(|| PathBuf::from("libs.toml"));
+    if let Err(error) = std::fs::write(&target, &report.toml) {
+        eprintln!("error: failed to write `{}`: {error}", target.display());
+        return std::process::ExitCode::from(exit_code::ExitCode::ConfigError as u8);
+    }
+    println!(
+        "generated {} function(s) for `{lib_path}` -> {}",
+        report.func_count,
+        target.display()
+    );
     std::process::ExitCode::from(exit_code::ExitCode::Success as u8)
 }
