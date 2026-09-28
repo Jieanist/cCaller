@@ -1,0 +1,18 @@
+# cCaller 等价库描述（对应 hitest/libs.toml）
+#
+# 迁移补上：
+#   - version = 1
+#   - slot_roles：mem_idx 被写（malloc 存指针）；addr_idx/mem_idx 被读
+#     （write32/read32/free 取指针）。hitest 里这些语义靠 wrapper 宏约定。
+
+version = 1
+
+[[libs]]
+path = "../../libc_wrapper/libc_wrapper.so"
+
+funcs = [
+  { name = "Call_malloc",  paras = ["len", "mem_idx"],         slot_roles = { mem_idx = "write" } },
+  { name = "Call_write32", paras = ["addr_idx", "off", "val"], slot_roles = { addr_idx = "read" } },
+  { name = "Call_read32",  paras = ["addr_idx", "off"],        slot_roles = { addr_idx = "read" } },
+  { name = "Call_free",    paras = ["mem_idx"],                slot_roles = { mem_idx = "read" } },
+]

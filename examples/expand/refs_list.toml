@@ -1,0 +1,49 @@
+# 展开语料 1：shared_inputs + refs + 列表 + $var（含 own-args 用 $var 引用单值 shared）
+#
+# 期望展开（expand 子命令核验用）：
+#
+#   测试 t_refs（refs=["common"]，shared_inputs.common.val 是列表 ["888","999"]）：
+#     组 ipt 合并后参数 val = [888, 999] → 2 个子用例：
+#       t_refs/ipt#0[val=888]
+#       t_refs/ipt#1[val=999]
+#
+#   测试 t_own_var_range（refs=["bounds"]，shared lo/hi/st 为单值；
+#     own-args off 的闭区间边界用 $lo/$hi/$st 引用这些单值）：
+#     组 ipt 合并后参数（按名字排序）= hi=[6], lo=[0], off=[0,3,6], st=[3]
+#     → 笛卡尔积 1×1×3×1 = 3 个子用例：
+#       t_own_var_range/ipt#0[hi=6,lo=0,off=0,st=3]
+#       t_own_var_range/ipt#1[hi=6,lo=0,off=3,st=3]
+#       t_own_var_range/ipt#2[hi=6,lo=0,off=6,st=3]
+#     注意：作为区间边界的单值 shared 参数 lo/hi/st 也会作为维度出现在子用例名里。
+
+version = 1
+
+# shared 值必须是字面量（不允许 $var）。
+[shared_inputs.common]
+val = ["888", "999"]   # 列表 → 每个元素一个子用例
+
+[shared_inputs.bounds]
+lo = 0
+hi = 6
+st = 3
+
+# 例 A：$var 用在 cmd 的 args 与 expect 中（按子用例绑定解析）。
+[[tests]]
+name = "t_refs"
+cmds = [
+  { opfunc = "Call_add", expect_eq = "$val", args = ["a=0", "b=$val"] },
+]
+[[tests.inputs]]
+name = "ipt"
+refs = ["common"]
+
+# 例 B：own-args 的闭区间边界用 $var 引用单值 shared 参数（FR-C-06）。
+[[tests]]
+name = "t_own_var_range"
+cmds = [
+  { opfunc = "Call_add", expect_eq = 0, args = ["a=$off", "b=0"] },
+]
+[[tests.inputs]]
+name = "ipt"
+refs = ["bounds"]
+args = { off = { start = "$lo", end = "$hi", step = "$st" } }

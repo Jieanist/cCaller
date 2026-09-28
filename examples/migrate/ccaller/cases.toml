@@ -1,0 +1,36 @@
+# cCaller 等价用例配置（对应 hitest/cases.toml）
+#
+# 迁移补上/改动：
+#   - version = 1
+#   - debug_test 单名 → 列表
+#   - expect_eq "!0" → expect_ne = 0
+#   - inputs 组名显式化（hitest 的 default1 → ipt1）
+#   - 组级 break_if_fail=false / should_panic=true 在 cCaller 暂无对应，
+#     故本样例不携带（migrate 应就此提示；M4 计划补“组级覆盖”）
+
+version = 1
+
+debug_test = ["test_rw_u32"]
+
+[shared_inputs.w888]
+val = [888]
+
+[[tests]]
+name = "test_rw_u32"
+thread_num = 2
+cmds = [
+  { opfunc = "Call_malloc",  expect_eq = 0, args = ["len=100", "mem_idx=1"] },
+  { opfunc = "Call_write32", expect_eq = 0, perf = true, args = ["addr_idx=1", "off=0", "val=$write_val"] },
+  { opfunc = "Call_read32",  expect_eq = "$write_val", args = ["addr_idx=1", "off=0"] },
+  { opfunc = "Call_read32",  expect_ne = 0, args = ["addr_idx=1", "off=0"] },
+  { opfunc = "Call_free",    expect_eq = 0, args = ["mem_idx=1"] },
+]
+[[tests.inputs]]
+name = "ipt1"
+args = { write_val = 888 }
+[[tests.inputs]]
+name = "ipt2"
+args = { write_val = 999 }
+[[tests.inputs]]
+name = "ipt3"
+args = { write_val = 555 }

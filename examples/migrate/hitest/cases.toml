@@ -1,0 +1,32 @@
+# hitest 风格用例配置（仅示意；ccaller 无法直接加载）
+#
+# 与 ccaller/cases.toml 对照的迁移点：
+#   - 顶层无 version（cCaller 需 version = 1）
+#   - debug_test 是单个字符串（cCaller 是列表）
+#   - 断言只有 expect_eq / expect_ne（cCaller 另有 expect_ge/lt/gt/le）
+#   - expect_eq = "!0" 是 hitest 的否定写法（= ret != 0；cCaller 折叠成 expect_ne = 0）
+#   - inputs 组名可省略（自动 default1…；cCaller 必须显式命名）
+#   - inputs 组级 break_if_fail / should_panic 可覆盖 Test 级（cCaller 暂无）
+#   - shared_inputs 的值是字符串（cCaller 是字面量 Int/Str）
+
+debug_test = "test_rw_u32"
+
+[shared_inputs]
+w888 = { val = "888" }
+
+[[tests]]
+name = "test_rw_u32"
+thread_num = 2
+cmds = [
+  { opfunc = "Call_malloc",  expect_eq = 0, args = ["len=100", "mem_idx=1"] },
+  { opfunc = "Call_write32", expect_eq = 0, perf = true, args = ["addr_idx=1", "off=0", "val=$write_val"] },
+  { opfunc = "Call_read32",  expect_eq = "$write_val", args = ["addr_idx=1", "off=0"] },
+  # hitest 否定：expect_eq "!0" 语义为「!= 0」；cCaller 写 expect_ne = 0
+  { opfunc = "Call_read32",  expect_eq = "!0", args = ["addr_idx=1", "off=0"] },
+  { opfunc = "Call_free",    expect_eq = 0, args = ["mem_idx=1"] },
+]
+inputs = [
+  { args = { write_val = "888" } },                                   # 自动命名 default1
+  { name = "ipt2", args = { write_val = "999" }, break_if_fail = false },
+  { name = "ipt3", args = { write_val = "555" }, should_panic = true },
+]

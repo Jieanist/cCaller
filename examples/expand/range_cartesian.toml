@@ -1,0 +1,30 @@
+# 展开语料 2：单组内笛卡尔积 + 参数名排序确定性（闭区间 + 列表）
+#
+# 期望展开（expand 子命令核验用）：
+#
+#   组 ipt 的参数按名字排序为 x, y：
+#     x = [1, 2]                       （列表，2 个值）
+#     y = { start=0, end=4, step=2 }   （闭区间 → [0, 2, 4]，3 个值）
+#   笛卡尔积 = 2 × 3 = 6 个子用例；排序规则（FR-C-05）：
+#     第一个排序参数 x 变化最慢，最后一个排序参数 y 变化最快：
+#
+#       t_cartesian/ipt#0[x=1,y=0]
+#       t_cartesian/ipt#1[x=1,y=2]
+#       t_cartesian/ipt#2[x=1,y=4]
+#       t_cartesian/ipt#3[x=2,y=0]
+#       t_cartesian/ipt#4[x=2,y=2]
+#       t_cartesian/ipt#5[x=2,y=4]
+
+version = 1
+
+[[tests]]
+name = "t_cartesian"
+cmds = [
+  { opfunc = "Call_add", expect_eq = 0, args = ["a=$x", "b=$y"] },
+]
+[[tests.inputs]]
+name = "ipt"
+args = {
+  x = [1, 2],
+  y = { start = 0, end = 4, step = 2 },
+}

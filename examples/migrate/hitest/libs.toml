@@ -1,0 +1,14 @@
+# hitest 风格库描述（仅示意；ccaller 无法直接加载，无 version / 无 slot_roles）
+#
+# 参数名与 sample/libmalloc.c 的 EXPORT_FUNC 一致：
+#   Call_malloc(len, mem_idx) / Call_write32(addr_idx, off, val)
+#   Call_read32(addr_idx, off) / Call_free(mem_idx)
+
+[[libs]]
+path = "libmalloc.so"
+funcs = [
+    { name = "Call_malloc",  paras = ["len", "mem_idx"] },
+    { name = "Call_write32", paras = ["addr_idx", "off", "val"] },
+    { name = "Call_read32",  paras = ["addr_idx", "off"] },
+    { name = "Call_free",    paras = ["mem_idx"] },
+]

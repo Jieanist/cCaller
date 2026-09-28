@@ -1,0 +1,32 @@
+# 展开语料 3：多输入组独立展开（不跨组笛卡尔积）+ 声明顺序
+#
+# 期望展开（expand 子命令核验用）：
+#
+#   一个测试可有多个 [[tests.inputs]] 组，各组**独立**展开（组与组之间不做
+#   笛卡尔积），并按声明顺序输出：
+#
+#     组 alpha（声明在先，1 个值）→ 1 个子用例
+#     组 beta （声明在后，2 个值）→ 2 个子用例
+#
+#   输出顺序 = 声明顺序：
+#       t_multi/alpha#0[p=10]
+#       t_multi/beta#0[p=20]
+#       t_multi/beta#1[p=21]
+
+version = 1
+
+[[tests]]
+name = "t_multi"
+cmds = [
+  { opfunc = "Call_add", expect_eq = 0, args = ["a=$p", "b=0"] },
+]
+
+# 第一个声明的组 → 先展开
+[[tests.inputs]]
+name = "alpha"
+args = { p = [10] }
+
+# 第二个声明的组 → 后展开
+[[tests.inputs]]
+name = "beta"
+args = { p = [20, 21] }

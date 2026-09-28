@@ -1,0 +1,13 @@
+# expand 语料共享库描述
+#
+# 只用 `Call_add(a, b)`（无 param_page 槽位），把关注点完全放在“输入展开”上，
+# 不触发 def-use 分析。三个用例文件都引用这份 libs.toml。
+
+version = 1
+
+[[libs]]
+path = "../libc_wrapper/libc_wrapper.so"
+
+funcs = [
+  { name = "Call_add", paras = ["a", "b"] },
+]
