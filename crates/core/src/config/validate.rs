@@ -804,17 +804,35 @@ cmds = [{ opfunc = "Call_ping", expect_eq = 0, stray = 1 }]
     #[test]
     fn unknown_expect_field_is_rejected_as_unknown_field__F_C_09() {
         // An unregistered `expect_*` name is an unknown field, not a
-        // silently ignored assertion (FR-C-09, FR-V-02).
+        // silently ignored assertion (FR-C-09, FR-V-02). The comparison
+        // kinds are all registered now (E-02), so the example must use a
+        // name the registry genuinely does not know.
         let diags = check(
             r#"
 version = 1
 [[tests]]
 name = "t"
-cmds = [{ opfunc = "Call_ping", expect_eq = 0, expect_gt = 5 }]
+cmds = [{ opfunc = "Call_ping", expect_eq = 0, expect_contains = 5 }]
 "#,
         );
         assert_eq!(codes_of(&diags), vec!["unknown_field"]);
-        assert!(diags[0].message.contains("unknown field `expect_gt`"));
+        assert!(diags[0].message.contains("unknown field `expect_contains`"));
+    }
+
+    #[test]
+    fn all_comparison_assertions_are_accepted_fields__F_V_03_E_02() {
+        // ge/gt/le/lt all count as "the one assertion" (fix E-02).
+        for field in ["expect_ge", "expect_gt", "expect_le", "expect_lt"] {
+            let diags = check(&format!(
+                r#"
+version = 1
+[[tests]]
+name = "t"
+cmds = [{{ opfunc = "Call_ping", {field} = 5 }}]
+"#
+            ));
+            assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        }
     }
 
     #[test]

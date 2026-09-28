@@ -410,6 +410,72 @@ fn max_thread_caps_the_worker_count__F_T_04() {
 }
 
 #[test]
+fn group_should_panic_override_partitions_one_test__F_T_05() {
+    // FR-T-05 group override: one test, two input groups. The test is a
+    // death test, but the second group opts out. Without a launcher the
+    // death executions skip; the opted-out execution really RUNS - its
+    // failing expectation is a failure, not a skip and not a crash
+    // verdict.
+    let cases = "version = 1\n\n\
+                 [[tests]]\nname = \"t\"\nshould_panic = true\ncmds = [\n\
+                 \x20 { opfunc = \"Call_env_fail\", expect_eq = 0 },\n]\n\
+                 [[tests.inputs]]\nname = \"death\"\nargs = { a = [1] }\n\
+                 [[tests.inputs]]\nname = \"normal\"\nshould_panic = false\nargs = { a = [2] }\n";
+    let report = run_cases_with(cases, RunOptions::default());
+    assert_eq!(report.summary.total, 2);
+    assert_eq!(report.summary.skipped, 1);
+    assert_eq!(report.summary.failure, 1);
+    let failed: Vec<&str> = report
+        .failures()
+        .into_iter()
+        .map(|case| case.name.as_str())
+        .collect();
+    assert_eq!(failed, vec!["t/normal#0[a=2]"]);
+    let skipped: Vec<&str> = report
+        .cases
+        .iter()
+        .filter(|case| case.status == CaseStatus::Skipped)
+        .map(|case| case.name.as_str())
+        .collect();
+    assert_eq!(skipped, vec!["t/death#0[a=1]"]);
+}
+
+#[test]
+fn group_break_if_fail_override_stops_or_continues_per_subcase__F_T_01() {
+    // FR-T-01 group override: the same failing command sequence, one
+    // group stopping at the first failure and one running both. The
+    // reasons differ only in how many failures they carry.
+    let cases = "version = 1\n\n\
+                 [[tests]]\nname = \"t\"\nbreak_if_fail = true\ncmds = [\n\
+                 \x20 { opfunc = \"Call_fail\", expect_eq = 0 },\n\
+                 \x20 { opfunc = \"Call_fail\", expect_eq = 0 },\n]\n\
+                 [[tests.inputs]]\nname = \"stops\"\nargs = { a = [1] }\n\
+                 [[tests.inputs]]\nname = \"continues\"\nbreak_if_fail = false\nargs = { a = [2] }\n";
+    let report = run_cases_with(cases, RunOptions::default());
+    assert_eq!(report.summary.total, 2);
+    assert_eq!(report.summary.failure, 2);
+    let by_name: std::collections::BTreeMap<&str, &str> = report
+        .cases
+        .iter()
+        .map(|case| {
+            (
+                case.name.as_str(),
+                case.reason.as_deref().unwrap_or_default(),
+            )
+        })
+        .collect();
+    // The stopping group carries one failure; the continuing one both.
+    let stops = by_name["t/stops#0[a=1]"];
+    let continues = by_name["t/continues#0[a=2]"];
+    assert_eq!(stops.matches("-42").count(), 1, "reason was: {stops}");
+    assert_eq!(
+        continues.matches("-42").count(),
+        2,
+        "reason was: {continues}"
+    );
+}
+
+#[test]
 fn concurrence_group_runs_members_in_parallel__F_T_03() {
     // FR-T-03: two group members run on separate threads; the fixture's
     // overlap counter proves they really ran concurrently.

@@ -8,7 +8,9 @@
 //! [`validate`] runs the cross-reference rules of FR-C-08, [`expand`]
 //! turns input groups into concrete sub-cases (FR-C-03~06), [`defuse`]
 //! runs the slot def-use analysis over the expanded sub-cases (FR-C-10),
-//! [`check`] glues every stage into the 7.6 report, and [`value`]
+//! [`check`] glues every stage into the 7.6 report, [`expand_report`]
+//! renders the sub-case listing of the `expand` tool, [`fmt`]
+//! normalizes a configuration file's TOML layout, and [`value`]
 //! defines the scalar grammar shared by command arguments and
 //! expectation values.
 
@@ -17,6 +19,8 @@ pub mod check;
 pub mod defuse;
 pub mod diag;
 pub mod expand;
+pub mod expand_report;
+pub mod fmt;
 pub mod layers;
 pub mod lib_desc;
 pub mod source;
@@ -33,6 +37,8 @@ pub use diag::{codes, Diagnostic};
 pub use expand::{
     expand_test, ResolvedCmd, ResolvedExpectation, SubCase, MAX_COMBINATIONS_PER_INPUT_GROUP,
 };
+pub use expand_report::{run_expand, ExpandReport, ExpandedSubCase, ExpandedTest, EXPAND_SCHEMA};
+pub use fmt::{normalize_toml, FmtError};
 pub use lib_desc::{
     validate as validate_lib_description, FuncDecl, LibDescription, LibEntry, SlotRole,
     SUPPORTED_VERSION,

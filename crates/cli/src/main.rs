@@ -1,10 +1,12 @@
 //! Command-line front end for the cCaller test framework.
 //!
 //! The surface is argument parsing (`--version`, `--help`, `-l/--log`,
-//! `-t/--test`, `-i/--lib`, `-d/--debug`, `-m/--max-thread`) plus two
-//! subcommands: `check` (FR-X-03) with text and JSON output, and `run`
-//! (FR-X-01, the default) which executes a configuration end to end
-//! with text, JSON, or JUnit output.
+//! `-t/--test`, `-i/--lib`, `-d/--debug`, `-m/--max-thread`) plus
+//! subcommands: `run` (FR-X-01, the default) which executes a
+//! configuration end to end with text, JSON, or JUnit output, `check`
+//! (FR-X-03) with text and JSON output, and the developer tools
+//! `expand` (the sub-case listing), `init` (project scaffolding), and
+//! `fmt` (canonical TOML re-layout).
 
 // The `__F_xx_nn` test-name suffixes mandated by verification plan
 // section 9.1 are intentionally upper-case; exempt test builds only.
@@ -20,12 +22,13 @@
 
 mod death;
 mod exit_code;
+mod init;
 mod logging;
 
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use ccaller_core::config::{run_check, CheckReport};
+use ccaller_core::config::{normalize_toml, run_check, run_expand, CheckReport, ExpandReport};
 use ccaller_core::death::DeathIsolation;
 use ccaller_core::error::CoreError;
 use ccaller_core::{
@@ -94,6 +97,32 @@ enum Sub {
         #[arg(long, value_enum, default_value_t = Format::Text)]
         format: Format,
     },
+    /// Print every test's expanded sub-cases (names and bindings);
+    /// nothing is executed.
+    Expand {
+        /// Output format (requirement spec 7.6 style).
+        #[arg(long, value_enum, default_value_t = Format::Text)]
+        format: Format,
+    },
+    /// Scaffold a new project: template libs.toml + cases.toml (+ build.sh).
+    Init {
+        /// Target directory (created when missing); defaults to `.`.
+        dir: Option<PathBuf>,
+        /// Also generate an executable build.sh template.
+        #[arg(long)]
+        build_sh: bool,
+    },
+    /// Re-render a TOML file in the canonical layout.
+    Fmt {
+        /// The file to normalize; defaults to --test.
+        file: Option<PathBuf>,
+        /// Write the result back to the file instead of stdout.
+        ///
+        /// Long-only: the short `-i` belongs to the global `--lib`
+        /// (requirement spec 7.2), which clap enforces as unique.
+        #[arg(long)]
+        in_place: bool,
+    },
 }
 
 /// Output format of `check` and `run` (requirement spec 7.6).
@@ -154,6 +183,9 @@ fn main() -> std::process::ExitCode {
             isolate_subcase,
         }),
         Sub::Check { format } => check(cli.test.as_deref(), cli.lib.as_deref(), format),
+        Sub::Expand { format } => expand(cli.test.as_deref(), cli.lib.as_deref(), format),
+        Sub::Init { dir, build_sh } => init(dir.unwrap_or_else(|| PathBuf::from(".")), build_sh),
+        Sub::Fmt { file, in_place } => fmt(file.or(cli.test), in_place),
     }
 }
 
@@ -355,4 +387,139 @@ fn print_config_findings(diagnostics: &[ccaller_core::config::Diagnostic]) {
             diagnostic.message
         );
     }
+}
+
+/// Runs the `expand` subcommand: the sub-case listing, nothing executed.
+///
+/// Exit codes align with `check` (FR-X-02): 0 when the configuration
+/// expands cleanly, 2 for load-time findings, missing options, and
+/// unreadable files.
+fn expand(test: Option<&Path>, lib: Option<&Path>, format: Format) -> std::process::ExitCode {
+    let (Some(test), Some(lib)) = (test, lib) else {
+        eprintln!("error: `expand` requires both --test and --lib");
+        return std::process::ExitCode::from(exit_code::ExitCode::ConfigError as u8);
+    };
+    match run_expand(lib, test) {
+        Ok(report) => {
+            match format {
+                Format::Text => print_expand_text(&report),
+                Format::Json => println!("{}", report.to_json()),
+                // A listing has no pass/fail semantics to render into a
+                // JUnit document; check rejects the format the same way.
+                Format::Junit => {
+                    eprintln!("error: `expand` supports --format text|json");
+                    return std::process::ExitCode::from(exit_code::ExitCode::ConfigError as u8);
+                }
+            }
+            let code = if report.ok() {
+                exit_code::ExitCode::Success
+            } else {
+                exit_code::ExitCode::ConfigError
+            };
+            std::process::ExitCode::from(code as u8)
+        }
+        Err(error @ CoreError::Io { .. }) => {
+            eprintln!("error: {error}");
+            std::process::ExitCode::from(exit_code::ExitCode::ConfigError as u8)
+        }
+        Err(error) => {
+            eprintln!("error: {error}");
+            std::process::ExitCode::from(exit_code::ExitCode::InternalError as u8)
+        }
+    }
+}
+
+/// Prints the human-readable sub-case listing to stdout.
+///
+/// One header line per test, then one indented line per sub-case: the
+/// display name and the `k=v` bindings in sorted key order (FR-R-01:
+/// results on stdout, logs on stderr).
+fn print_expand_text(report: &ExpandReport) {
+    for diagnostic in &report.errors {
+        eprintln!(
+            "{}:{}:{}: error[{}]: {}",
+            diagnostic.location.file,
+            diagnostic.location.line,
+            diagnostic.location.column,
+            diagnostic.code,
+            diagnostic.message
+        );
+    }
+    if !report.ok() {
+        return;
+    }
+    for test in &report.tests {
+        println!("{}: {} subcase(s)", test.name, test.subcases.len());
+        for subcase in &test.subcases {
+            let bindings: Vec<String> = subcase
+                .bindings
+                .iter()
+                .map(|(name, value)| format!("{name}={value}"))
+                .collect();
+            if bindings.is_empty() {
+                println!("  {}", subcase.name);
+            } else {
+                println!("  {}  {}", subcase.name, bindings.join(" "));
+            }
+        }
+    }
+}
+
+/// Runs the `init` subcommand (scaffolding).
+///
+/// Exit codes (FR-X-02): 0 when the scaffold was written, 2 when a
+/// target exists (nothing is overwritten silently) or the directory
+/// cannot be created.
+fn init(dir: PathBuf, build_sh: bool) -> std::process::ExitCode {
+    match init::scaffold(&dir, build_sh) {
+        Ok(written) => {
+            for path in written {
+                println!("created {path}");
+            }
+            std::process::ExitCode::from(exit_code::ExitCode::Success as u8)
+        }
+        Err(init::ScaffoldError::Exists(path)) => {
+            eprintln!("error: `{path}` already exists; refusing to overwrite it");
+            std::process::ExitCode::from(exit_code::ExitCode::ConfigError as u8)
+        }
+        Err(error) => {
+            eprintln!("error: {error}");
+            std::process::ExitCode::from(exit_code::ExitCode::ConfigError as u8)
+        }
+    }
+}
+
+/// Runs the `fmt` subcommand (canonical TOMM re-layout).
+///
+/// The normalized document goes to stdout, or back to the file with
+/// `-i`. Exit codes (FR-X-02): 0 on success, 2 when no file is named,
+/// the file is unreadable, or it is not valid TOML.
+fn fmt(file: Option<PathBuf>, in_place: bool) -> std::process::ExitCode {
+    let Some(file) = file else {
+        eprintln!("error: `fmt` requires a FILE argument or --test");
+        return std::process::ExitCode::from(exit_code::ExitCode::ConfigError as u8);
+    };
+    let text = match std::fs::read_to_string(&file) {
+        Ok(text) => text,
+        Err(source) => {
+            eprintln!("error: failed to read `{}`: {source}", file.display());
+            return std::process::ExitCode::from(exit_code::ExitCode::ConfigError as u8);
+        }
+    };
+    let normalized = match normalize_toml(&text) {
+        Ok(normalized) => normalized,
+        Err(error) => {
+            eprintln!("error: {}:{}: {}", file.display(), error, error.message);
+            return std::process::ExitCode::from(exit_code::ExitCode::ConfigError as u8);
+        }
+    };
+    if in_place {
+        if let Err(source) = std::fs::write(&file, &normalized) {
+            eprintln!("error: failed to write `{}`: {source}", file.display());
+            return std::process::ExitCode::from(exit_code::ExitCode::ConfigError as u8);
+        }
+    } else {
+        print!("{normalized}");
+    }
+    std::process::ExitCode::from(exit_code::ExitCode::Success as u8)
 }

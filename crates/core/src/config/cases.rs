@@ -239,6 +239,16 @@ pub struct InputGroup {
     /// Own parameters: single value, list, or closed range.
     #[serde(default)]
     pub args: BTreeMap<String, Spanned<InputValue>>,
+    /// Group-level death-test override (FR-T-05): when set, it replaces
+    /// the test-level `should_panic` for every sub-case this group
+    /// expands into; `None` inherits the test's flag.
+    #[serde(default)]
+    pub should_panic: Option<bool>,
+    /// Group-level failure-handling override (FR-T-01): when set, it
+    /// replaces the test-level `break_if_fail` for every sub-case this
+    /// group expands into; `None` inherits the test's flag.
+    #[serde(default)]
+    pub break_if_fail: Option<bool>,
 }
 
 /// The three value forms an input parameter can take (FR-C-04).
@@ -386,6 +396,54 @@ tests = ["test_sock"]                 # referenced tests no longer run standalon
         assert_eq!(err.code, "unknown_field");
         assert!(err.message.contains("threads"));
         // FR-C-09: the location must be inside the file, not a default.
+        assert!(err.location.line >= 1);
+    }
+
+    #[test]
+    fn input_group_flags_parse_and_default_to_none__F_C_05() {
+        let config = parse(
+            "version = 1\n\
+             [[tests]]\n\
+             name = \"t\"\n\
+             cmds = [{ opfunc = \"Call_x\", expect_eq = 0 }]\n\
+             [[tests.inputs]]\n\
+             name = \"overridden\"\n\
+             should_panic = false\n\
+             break_if_fail = true\n\
+             args = { a = [1] }\n\
+             [[tests.inputs]]\n\
+             name = \"plain\"\n\
+             args = { b = [2] }\n",
+        )
+        .unwrap();
+        let inputs = &config.tests[0].get_ref().inputs;
+        assert_eq!(inputs[0].get_ref().should_panic, Some(false));
+        assert_eq!(inputs[0].get_ref().break_if_fail, Some(true));
+        assert_eq!(inputs[1].get_ref().should_panic, None);
+        assert_eq!(inputs[1].get_ref().break_if_fail, None);
+    }
+
+    #[test]
+    fn input_group_flags_accept_only_booleans__F_C_09() {
+        // A non-boolean override is a type mismatch with a location,
+        // like every other typed field.
+        let err = parse(
+            "version = 1\n\
+             [[tests]]\n\
+             name = \"t\"\n\
+             cmds = [{ opfunc = \"Call_x\", expect_eq = 0 }]\n\
+             [[tests.inputs]]\n\
+             name = \"g\"\n\
+             should_panic = \"yes\"\n\
+             args = { a = [1] }\n",
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "type_mismatch");
+        assert!(
+            err.message.contains("boolean"),
+            "message was: {}",
+            err.message
+        );
         assert!(err.location.line >= 1);
     }
 

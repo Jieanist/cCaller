@@ -84,6 +84,12 @@ pub struct SubCase {
     pub bindings: BTreeMap<String, ConcreteValue>,
     /// Commands with all values resolved.
     pub cmds: Vec<ResolvedCmd>,
+    /// Group-level `should_panic` override for this sub-case (FR-T-05);
+    /// `None` inherits the test-level flag.
+    pub should_panic: Option<bool>,
+    /// Group-level `break_if_fail` override for this sub-case (FR-T-01);
+    /// `None` inherits the test-level flag.
+    pub break_if_fail: Option<bool>,
 }
 
 /// Expands every input group of `test` into concrete sub-cases.
@@ -109,6 +115,9 @@ pub fn expand_test(
                 name: test_name.to_string(),
                 bindings,
                 cmds,
+                // No input group: nothing overrides the test-level flags.
+                should_panic: None,
+                break_if_fail: None,
             });
         }
     }
@@ -145,6 +154,10 @@ pub fn expand_test(
                             name: subcase_name(test_name, group_name, index, &bindings),
                             bindings,
                             cmds,
+                            // The group's own flags, when declared, override
+                            // the test-level defaults for its sub-cases.
+                            should_panic: group_ref.should_panic,
+                            break_if_fail: group_ref.break_if_fail,
                         });
                     }
                     advance_odometer(&mut indices, &lists);
@@ -1181,9 +1194,9 @@ args = { floor = [7, 9] }
     }
 
     #[test]
-    fn comparison_assertion_negation_without_counterpart_is_rejected__F_V_03() {
-        // `expect_ge` folds `!` into `expect_lt`, which is not registered;
-        // the fold must fail loudly instead of being dropped.
+    fn comparison_assertion_negation_folds_into_its_counterpart__F_V_03_E_02() {
+        // E-02: `expect_ge` folds `!` into `expect_lt`, which is now
+        // registered, so the fold resolves instead of failing.
         let (subcases, diags) = expand_first(
             r#"
 version = 1
@@ -1192,9 +1205,47 @@ name = "t"
 cmds = [{ opfunc = "Call_ping", expect_ge = "!7" }]
 "#,
         );
-        assert_eq!(codes_of(&diags), vec!["invalid_value"]);
-        assert!(diags[0].message.contains("expect_lt"));
-        assert!(subcases.is_empty());
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        assert_eq!(
+            subcases[0].cmds[0].expect,
+            Some(ResolvedExpectation {
+                kind: "expect_lt",
+                value: ConcreteValue::Int(7)
+            })
+        );
+        let expectation = subcases[0].cmds[0].expect.as_ref().unwrap();
+        assert!(expectation.evaluate(6).passed);
+        assert!(!expectation.evaluate(7).passed);
+        assert!(!expectation.evaluate(8).passed);
+        assert_eq!(expectation.evaluate(6).expectation, "expect_lt 7");
+    }
+
+    #[test]
+    fn every_comparison_negation_fold_resolves__F_V_03_E_02() {
+        // The full counterpart matrix folds cleanly: ge<->lt and gt<->le.
+        // Each row names an actual value the folded assertion accepts.
+        for (declared, folded, passing_actual) in [
+            ("expect_ge", "expect_lt", 6i64),
+            ("expect_gt", "expect_le", 6),
+            ("expect_le", "expect_gt", 8),
+            ("expect_lt", "expect_ge", 8),
+        ] {
+            let (subcases, diags) = expand_first(&format!(
+                r#"
+version = 1
+[[tests]]
+name = "t"
+cmds = [{{ opfunc = "Call_ping", {declared} = "!7" }}]
+"#
+            ));
+            assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+            let expect = subcases[0].cmds[0].expect.as_ref().unwrap();
+            assert_eq!(expect.kind, folded);
+            assert!(
+                expect.evaluate(passing_actual).passed,
+                "{folded} 7 must accept {passing_actual}"
+            );
+        }
     }
 
     #[test]
@@ -1333,6 +1384,42 @@ cmds = [{ opfunc = "Call_ping", expect_eq = 0 }]
         assert_eq!(names_of(&subcases), vec!["t"]);
         assert!(subcases[0].bindings.is_empty());
         assert_eq!(subcases[0].cmds.len(), 1);
+    }
+
+    #[test]
+    fn group_flags_override_the_subcase_defaults__F_C_05() {
+        // Group-level should_panic/break_if_fail travel with every
+        // sub-case the group expands into; a group that does not declare
+        // them leaves `None`, which inherits the test-level flags.
+        let (subcases, diags) = expand_first(
+            r#"
+version = 1
+[[tests]]
+name = "t"
+should_panic = true
+break_if_fail = false
+cmds = [{ opfunc = "Call_ping", expect_eq = 0 }]
+[[tests.inputs]]
+name = "overridden"
+should_panic = false
+break_if_fail = true
+args = { a = [1, 2] }
+[[tests.inputs]]
+name = "inheriting"
+args = { b = [3] }
+"#,
+        );
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        assert_eq!(subcases.len(), 3);
+        assert_eq!(subcases[0].name, "t/overridden#0[a=1]");
+        assert_eq!(subcases[0].should_panic, Some(false));
+        assert_eq!(subcases[0].break_if_fail, Some(true));
+        assert_eq!(subcases[1].name, "t/overridden#1[a=2]");
+        assert_eq!(subcases[1].should_panic, Some(false));
+        assert_eq!(subcases[1].break_if_fail, Some(true));
+        assert_eq!(subcases[2].name, "t/inheriting#0[b=3]");
+        assert_eq!(subcases[2].should_panic, None);
+        assert_eq!(subcases[2].break_if_fail, None);
     }
 
     #[test]

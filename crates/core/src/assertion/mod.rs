@@ -11,6 +11,9 @@
 
 mod eq;
 mod ge;
+mod gt;
+mod le;
+mod lt;
 mod ne;
 
 use std::fmt::Debug;
@@ -19,6 +22,9 @@ use crate::config::value::ConcreteValue;
 
 pub use eq::Eq;
 pub use ge::Ge;
+pub use gt::Gt;
+pub use le::Le;
+pub use lt::Lt;
 pub use ne::Ne;
 
 /// Result of evaluating one resolved assertion against an actual value.
@@ -61,8 +67,19 @@ pub trait Assertion: Debug + Send + Sync {
 /// implements [`Assertion`]; nothing else changes (FR-V-02, G-02, A-2).
 /// Order here is the canonical order used when several field names must be
 /// listed in one diagnostic.
-static ASSERTIONS: &[(&str, &dyn Assertion)] =
-    &[("expect_eq", &Eq), ("expect_ne", &Ne), ("expect_ge", &Ge)];
+///
+/// Every comparison kind is registered (fix E-02): the `!value` fold of
+/// `expect_ge` into `expect_lt` — and of each comparison into its
+/// counterpart — resolves to a real assertion instead of a load-time
+/// "not registered" error.
+static ASSERTIONS: &[(&str, &dyn Assertion)] = &[
+    ("expect_eq", &Eq),
+    ("expect_ne", &Ne),
+    ("expect_ge", &Ge),
+    ("expect_gt", &Gt),
+    ("expect_le", &Le),
+    ("expect_lt", &Lt),
+];
 
 /// Looks up a registered assertion by its configuration field name.
 pub fn lookup(field_name: &str) -> Option<&'static dyn Assertion> {
@@ -110,8 +127,15 @@ mod tests {
     fn registry_lookup_finds_registered_and_none_else__F_V_02() {
         assert!(lookup("expect_eq").is_some());
         assert!(lookup("expect_ne").is_some());
-        assert!(lookup("expect_gt").is_none());
+        // Every comparison kind is registered (fix E-02), so the fold
+        // `!expect_ge` -> `expect_lt` resolves.
+        assert!(lookup("expect_ge").is_some());
+        assert!(lookup("expect_gt").is_some());
+        assert!(lookup("expect_le").is_some());
+        assert!(lookup("expect_lt").is_some());
+        // Not an assertion at all, and a plausible-but-unregistered name.
         assert!(lookup("threads").is_none());
+        assert!(lookup("expect_contains").is_none());
     }
 
     #[test]
@@ -126,6 +150,28 @@ mod tests {
             eq < ne,
             "expect_eq must precede expect_ne in registry order"
         );
+    }
+
+    #[test]
+    fn every_negation_fold_resolves_to_a_registered_counterpart__F_V_02_E_02() {
+        // E-02: a `!value` prefix folds through
+        // [`Assertion::negated_field_name`]; every declared counterpart
+        // must exist in the registry or the fold is a load-time error.
+        for (name, assertion) in iter() {
+            if let Some(counterpart) = assertion.negated_field_name() {
+                assert!(
+                    lookup(counterpart).is_some(),
+                    "`{name}` folds `!` into `{counterpart}`, which is not registered"
+                );
+                // The fold is an involution: the counterpart folds back.
+                let back = lookup(counterpart).and_then(|assertion| assertion.negated_field_name());
+                assert_eq!(
+                    back,
+                    Some(name),
+                    "`{counterpart}` must fold back into `{name}`"
+                );
+            }
+        }
     }
 
     #[test]

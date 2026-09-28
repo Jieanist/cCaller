@@ -548,6 +548,18 @@ fn absorb_worker(
     *skipped += worker_skipped;
 }
 
+/// Resolves a sub-case's death-test flag (FR-T-05): the input group's
+/// override, else the test-level default.
+fn effective_should_panic(test: &TestPlan, subcase: &SubCase) -> bool {
+    subcase.should_panic.unwrap_or(test.should_panic)
+}
+
+/// Resolves a sub-case's failure handling (FR-T-01): the input group's
+/// override, else the test-level default.
+fn effective_break_if_fail(test: &TestPlan, subcase: &SubCase) -> bool {
+    subcase.break_if_fail.unwrap_or(test.break_if_fail)
+}
+
 /// Runs one test: its executions on this thread or on workers.
 ///
 /// A death test (FR-T-05) executes in isolated children instead — see
@@ -555,6 +567,10 @@ fn absorb_worker(
 /// serial test runs inline on the owning thread's page (today's
 /// behaviour), and a parallel test spreads its executions over
 /// [`worker_count`] workers, each owning a private page copy.
+///
+/// A test whose input groups override `should_panic` (FR-T-05) can mix
+/// death and normal executions; the death ones isolate in children and
+/// the rest run through the normal scheduler.
 fn run_test(
     ctx: &RunContext<'_>,
     test: &TestPlan,
@@ -564,15 +580,27 @@ fn run_test(
     perf: &mut Vec<PerfSample>,
     skipped: &mut usize,
 ) {
-    let executions = executions_of(ctx.options, test, group);
-    if executions.is_empty() {
+    let all = executions_of(ctx.options, test, group);
+    if all.is_empty() {
         return;
     }
 
-    if test.should_panic && ctx.options.isolate.is_none() {
-        run_death_test(ctx, test, &executions, cases);
-        return;
-    }
+    let executions: Vec<Execution<'_>> = if ctx.options.isolate.is_some() {
+        // A death-test child runs its target as a normal test; the
+        // death dispatch below belongs to the parent only.
+        all
+    } else {
+        let (death, normal): (Vec<_>, Vec<_>) = all
+            .into_iter()
+            .partition(|execution| effective_should_panic(test, execution.subcase));
+        if !death.is_empty() {
+            run_death_test(ctx, test, &death, cases);
+        }
+        if normal.is_empty() {
+            return;
+        }
+        normal
+    };
 
     let serial = ctx.options.isolate.is_some()
         || plan::effective_serial(test.serial, ctx.options.serial, ctx.plan.default_serial);
@@ -856,8 +884,9 @@ fn run_framed_executions(
                     CmdResult::Failed(reason) => {
                         failures.push(reason);
                         // FR-T-01: a failure interrupts the remaining
-                        // Cmds only when break_if_fail is true.
-                        if test.break_if_fail {
+                        // Cmds only when the (possibly group-overridden)
+                        // break_if_fail is true.
+                        if effective_break_if_fail(test, execution.subcase) {
                             break;
                         }
                     }
@@ -1111,6 +1140,8 @@ mod tests {
                     name: (*subcase).to_string(),
                     bindings: BTreeMap::new(),
                     cmds: Vec::new(),
+                    should_panic: None,
+                    break_if_fail: None,
                 })
                 .collect(),
             serial: None,
@@ -1162,6 +1193,29 @@ mod tests {
         let test = test_plan("t", 1, &["t"]);
         let executions = executions_of(&options, &test, Some("mixed_io"));
         assert_eq!(executions[0].display, "mixed_io/t");
+    }
+
+    #[test]
+    fn group_overrides_win_over_the_test_level_flags__F_T_05_F_T_01() {
+        let mut test = test_plan("t", 1, &["t/a#0[x=1]", "t/a#1[x=2]"]);
+        test.should_panic = true;
+        test.break_if_fail = true;
+        // Neither sub-case overrides: both inherit the death-test path.
+        assert!(effective_should_panic(&test, &test.subcases[0]));
+        assert!(effective_break_if_fail(&test, &test.subcases[0]));
+        // One group opts out of both: its sub-case runs normally.
+        let mut opted_out = test.subcases[1].clone();
+        opted_out.should_panic = Some(false);
+        opted_out.break_if_fail = Some(false);
+        assert!(!effective_should_panic(&test, &opted_out));
+        assert!(!effective_break_if_fail(&test, &opted_out));
+        // A group can also force the death path onto an otherwise normal
+        // test.
+        let mut normal = test_plan("t2", 1, &["t2"]);
+        normal.should_panic = false;
+        let mut forced = normal.subcases[0].clone();
+        forced.should_panic = Some(true);
+        assert!(effective_should_panic(&normal, &forced));
     }
 
     #[test]
