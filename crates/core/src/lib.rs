@@ -21,13 +21,21 @@
 
 pub mod assertion;
 pub mod config;
+pub mod death;
 pub mod error;
 pub mod plan;
 pub mod report;
 pub mod run;
 pub mod runtime;
 
+pub use death::{
+    isolate_child, DeathIsolation, DeathLauncher, DeathOutcome, DeathTestRequest,
+    DEFAULT_DEATH_TIMEOUT,
+};
 pub use error::{CoreError, Location};
 pub use plan::{build_plan, Plan, PlanOutcome};
-pub use report::{ConsoleReporter, FailedCase, Reporter, RunReport, RunSummary};
-pub use run::{execute, RunError, RunOptions, Runner};
+pub use report::{
+    CaseOutcome, CaseStatus, ConsoleReporter, JsonReporter, JunitReporter, PerfSample, Reporter,
+    RunReport, RunSummary, RUN_REPORT_SCHEMA,
+};
+pub use run::{execute, IsolationTarget, RunError, RunOptions, Runner};

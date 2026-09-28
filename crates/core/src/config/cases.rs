@@ -45,7 +45,7 @@ pub struct CaseConfig {
     pub process_env: Option<Spanned<GlobalEnv>>,
     /// Debug test names; takes priority over CLI `-d` (FR-T-08, M2).
     #[serde(default)]
-    pub debug_test: Vec<String>,
+    pub debug_test: Vec<Spanned<String>>,
     /// Default `serial` for tests that do not declare it.
     #[serde(default)]
     pub default_serial: bool,

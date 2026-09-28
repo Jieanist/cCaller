@@ -70,6 +70,8 @@ pub struct ResolvedCmd {
     pub args: Vec<(String, ConcreteValue)>,
     /// The resolved expectation, if the command carries one.
     pub expect: Option<ResolvedExpectation>,
+    /// Whether the executor records this call's duration (FR-P-01).
+    pub perf: bool,
 }
 
 /// One concrete sub-case of a test (FR-C-05).
@@ -629,6 +631,7 @@ fn resolve_cmds(
             opfunc: cmd.opfunc.get_ref().clone(),
             args,
             expect,
+            perf: cmd.perf,
         });
     }
 

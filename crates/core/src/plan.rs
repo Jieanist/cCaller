@@ -44,9 +44,24 @@ pub struct Plan {
     pub case_envs: Vec<CaseEnvPlan>,
     /// Tests in declaration order, each with its expanded sub-cases.
     pub tests: Vec<TestPlan>,
+    /// Concurrency groups in declaration order (FR-T-03); a referenced
+    /// test runs only inside its group.
+    pub concurrency_groups: Vec<ConcurrencyGroupPlan>,
+    /// The configuration's `debug_test` names (FR-T-08); they take
+    /// priority over the CLI `-d` selection at run time.
+    pub debug_tests: Vec<String>,
     /// Default `serial` value for tests that do not declare one
     /// (requirement spec 7.3, FR-T-09).
     pub default_serial: bool,
+}
+
+/// One concurrency group: the member tests run in parallel (FR-T-03).
+#[derive(Debug)]
+pub struct ConcurrencyGroupPlan {
+    /// The group's name; prefixes its members' display names in reports.
+    pub name: String,
+    /// Names of the member tests, in declaration order.
+    pub tests: Vec<String>,
 }
 
 /// One name-less env layer's resolved init and exit commands.
@@ -87,6 +102,10 @@ pub struct TestPlan {
     pub serial: Option<bool>,
     /// Whether this is a death test (FR-T-05).
     pub should_panic: bool,
+    /// Worker threads for this test; `>= 1` (FR-T-02). Each worker owns
+    /// one `param_page` (Q-06) and the sub-cases are duplicated once per
+    /// replica, exactly as the thread-per-test stress mode of hitest.
+    pub thread_num: usize,
 }
 
 /// Computes the effective serial flag for one test (FR-T-09/T-10).
@@ -104,7 +123,13 @@ pub(crate) fn effective_serial(
 }
 
 /// The result of [`build_plan`]: a ready plan or the load-time findings.
+///
+/// The variants differ in size because [`Plan`] grew with the M3
+/// scheduling fields; it stays unboxed deliberately - a plan is built
+/// once per run and is the executor's hot value, while the small
+/// `Invalid` variant is a cold error path.
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum PlanOutcome {
     /// The plan is complete and executable.
     Ready(Plan),
@@ -212,6 +237,23 @@ fn assemble(
                 subcases: subcases.clone(),
                 serial: test.serial,
                 should_panic: test.should_panic,
+                thread_num: (*test.thread_num.get_ref() as usize).max(1),
+            }
+        })
+        .collect();
+
+    let concurrency_groups = cases
+        .concurrences
+        .iter()
+        .map(|group| {
+            let group = group.get_ref();
+            ConcurrencyGroupPlan {
+                name: group.name.get_ref().clone(),
+                tests: group
+                    .tests
+                    .iter()
+                    .map(|test| test.get_ref().clone())
+                    .collect(),
             }
         })
         .collect();
@@ -223,6 +265,12 @@ fn assemble(
         thread_env,
         case_envs,
         tests,
+        concurrency_groups,
+        debug_tests: cases
+            .debug_test
+            .iter()
+            .map(|name| name.get_ref().clone())
+            .collect(),
         default_serial: cases.default_serial,
     })
 }
@@ -230,7 +278,14 @@ fn assemble(
 /// Translates the parsed library description into loader requests, with
 /// each path resolved against the description file's directory.
 fn library_requests(libs: &LibDescription, lib_path: &Path) -> Vec<LibraryRequest> {
-    let base = lib_path.parent().unwrap_or_else(|| Path::new("."));
+    // A bare `libs.toml` has the empty path as its parent; joining onto
+    // "" keeps the library path slash-free, and dlopen then resolves it
+    // through the OS library search instead of opening it directly. Dot
+    // keeps the joined path relative-but-direct.
+    let base = lib_path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
     libs.libs
         .iter()
         .map(|lib| {
@@ -300,6 +355,7 @@ fn resolve_env_cmds(
             opfunc: cmd.opfunc.get_ref().clone(),
             args,
             expect,
+            perf: cmd.perf,
         });
     }
     Ok(resolved)
@@ -436,11 +492,13 @@ mod tests {
             "version = 1\n[[tests]]\nname = \"t\"\ncmds = [{ opfunc = \"Call_ping\", expect_eq = 0 }]\n",
         );
         assert_eq!(plan.libraries.len(), 1);
-        // The description file is `libs.toml`; its directory is the parent
-        // of that path (empty -> the joined relative path stays intact).
+        // The description file is `libs.toml`; a bare filename has the
+        // empty parent, so the base normalizes to `.` and the joined
+        // path stays description-relative (and slash-bearing, which
+        // dlopen requires to open a file directly).
         assert_eq!(
             plan.libraries[0].path,
-            std::path::PathBuf::from("lib/wrapper.so")
+            std::path::PathBuf::from("./lib/wrapper.so")
         );
         assert_eq!(plan.libraries[0].func_names, vec!["Call_ping".to_string()]);
     }
@@ -510,5 +568,66 @@ mod tests {
         assert!(effective_serial(None, true, true));
         assert!(!effective_serial(None, false, false));
         assert!(effective_serial(None, false, true));
+    }
+
+    #[test]
+    fn concurrency_and_thread_plumbing_assembles__F_T_02_F_T_03() {
+        // FR-T-02: thread_num rides on the test plan; FR-T-03: concurrency
+        // groups ride on the run plan with their member names; FR-T-08:
+        // the configuration's debug names ride along for run-time filtering.
+        let cases = "version = 1\n\
+                     debug_test = []\n\
+                     [[tests]]\nname = \"t1\"\nthread_num = 4\ncmds = [{ opfunc = \"Call_ping\", expect_eq = 0 }]\n\
+                     [[tests]]\nname = \"t2\"\ncmds = [{ opfunc = \"Call_ping\", expect_eq = 0 }]\n\
+                     [[concurrences]]\nname = \"g\"\ntests = [\"t2\"]\n";
+        let plan = plan(LIBS, cases);
+        assert_eq!(plan.tests[0].thread_num, 4);
+        assert_eq!(plan.tests[1].thread_num, 1);
+        assert_eq!(plan.concurrency_groups.len(), 1);
+        assert_eq!(plan.concurrency_groups[0].name, "g");
+        assert_eq!(plan.concurrency_groups[0].tests, vec!["t2".to_string()]);
+        assert!(plan.debug_tests.is_empty());
+    }
+
+    #[test]
+    fn debug_tests_assemble_for_run_time_filtering__F_T_08() {
+        let cases = "version = 1\n\
+                     debug_test = [\"t2\"]\n\
+                     [[tests]]\nname = \"t1\"\ncmds = [{ opfunc = \"Call_ping\", expect_eq = 0 }]\n\
+                     [[tests]]\nname = \"t2\"\ncmds = [{ opfunc = \"Call_ping\", expect_eq = 0 }]\n";
+        let plan = plan(LIBS, cases);
+        assert_eq!(plan.debug_tests, vec!["t2".to_string()]);
+    }
+
+    #[test]
+    fn perf_flag_survives_resolution__F_P_01() {
+        // CmdDef.perf must reach the executable ResolvedCmd (FR-P-01) —
+        // for test commands (expansion) and env commands (plan assembly).
+        let cases = "version = 1\n\
+                     [env]\ninit = [{ opfunc = \"Call_ping\", perf = true }]\n\
+                     [[tests]]\nname = \"t\"\ncmds = [\n\
+                     \x20 { opfunc = \"Call_ping\", expect_eq = 0, perf = true },\n\
+                     \x20 { opfunc = \"Call_ping\", expect_eq = 0 },\n]\n";
+        let plan = plan(LIBS, cases);
+        assert!(plan.global_env.as_ref().unwrap().init[0].perf);
+        assert!(plan.tests[0].subcases[0].cmds[0].perf);
+        assert!(!plan.tests[0].subcases[0].cmds[1].perf);
+    }
+
+    #[test]
+    fn bare_relative_description_yields_a_directly_openable_path__F_A_02() {
+        // A description given as a bare `libs.toml` must resolve library
+        // paths against `.`, not against the empty path: dlopen treats a
+        // slash-free name as a library-search name, silently ignoring the
+        // description's directory (found while exercising M3 end to end).
+        let plan = plan(
+            LIBS,
+            "version = 1\n[[tests]]\nname = \"t\"\ncmds = [{ opfunc = \"Call_ping\", expect_eq = 0 }]\n",
+        );
+        assert_eq!(
+            plan.libraries[0].path,
+            Path::new("./wrapper.so"),
+            "paths must carry a slash so dlopen opens them directly"
+        );
     }
 }

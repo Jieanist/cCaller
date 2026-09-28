@@ -1,10 +1,10 @@
 //! Command-line front end for the cCaller test framework.
 //!
 //! The surface is argument parsing (`--version`, `--help`, `-l/--log`,
-//! `-t/--test`, `-i/--lib`) plus two subcommands: `check` (FR-X-03) with
-//! text and JSON output, and `run` (FR-X-01) which executes a
-//! configuration end to end and is the default when no subcommand is
-//! given.
+//! `-t/--test`, `-i/--lib`, `-d/--debug`, `-m/--max-thread`) plus two
+//! subcommands: `check` (FR-X-03) with text and JSON output, and `run`
+//! (FR-X-01, the default) which executes a configuration end to end
+//! with text, JSON, or JUnit output.
 
 // The `__F_xx_nn` test-name suffixes mandated by verification plan
 // section 9.1 are intentionally upper-case; exempt test builds only.
@@ -18,6 +18,7 @@
     )
 )]
 
+mod death;
 mod exit_code;
 mod logging;
 
@@ -25,8 +26,11 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use ccaller_core::config::{run_check, CheckReport};
+use ccaller_core::death::DeathIsolation;
 use ccaller_core::error::CoreError;
-use ccaller_core::{ConsoleReporter, RunError, RunOptions};
+use ccaller_core::{
+    ConsoleReporter, IsolationTarget, JsonReporter, JunitReporter, RunError, RunOptions,
+};
 use clap::{Parser, Subcommand, ValueEnum};
 
 /// Generic C-interface test execution framework.
@@ -46,6 +50,18 @@ struct Cli {
     /// Library description (requirement spec 7.2).
     #[arg(short = 'i', long, global = true, alias = "input", value_name = "FILE")]
     lib: Option<PathBuf>,
+    /// Run only the named test (FR-T-08); the configuration's `debug_test` wins.
+    #[arg(short, long, global = true, value_name = "NAME")]
+    debug: Option<String>,
+    /// Maximum concurrent worker threads (FR-T-04); at least 1.
+    #[arg(
+        short = 'm',
+        long,
+        global = true,
+        value_name = "N",
+        value_parser = clap::value_parser!(u64).range(1..)
+    )]
+    max_thread: Option<u64>,
 
     #[command(subcommand)]
     command: Option<Sub>,
@@ -62,6 +78,15 @@ enum Sub {
         /// Force every test's sub-cases to run serially (FR-T-09).
         #[arg(long)]
         serial: bool,
+        /// Output format of the run report.
+        #[arg(long, value_enum, default_value_t = Format::Text)]
+        format: Format,
+        /// Internal: the test a death-test child executes (FR-T-05).
+        #[arg(long, hide = true)]
+        isolate_test: Option<String>,
+        /// Internal: the sub-case a death-test child executes (FR-T-05).
+        #[arg(long, hide = true)]
+        isolate_subcase: Option<String>,
     },
     /// Load-time validation and static slot analysis; nothing is executed.
     Check {
@@ -71,13 +96,15 @@ enum Sub {
     },
 }
 
-/// Output format of `check` (requirement spec 7.6).
+/// Output format of `check` and `run` (requirement spec 7.6).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 enum Format {
     /// Human-readable findings (the default).
     Text,
     /// The machine-readable 7.6 JSON contract.
     Json,
+    /// The JUnit XML schema CI systems ingest.
+    Junit,
 }
 
 impl fmt::Display for Format {
@@ -85,6 +112,7 @@ impl fmt::Display for Format {
         f.write_str(match self {
             Format::Text => "text",
             Format::Json => "json",
+            Format::Junit => "junit",
         })
     }
 }
@@ -104,76 +132,103 @@ fn main() -> std::process::ExitCode {
     match cli.command.unwrap_or(Sub::Run {
         allow_empty: false,
         serial: false,
+        format: Format::Text,
+        isolate_test: None,
+        isolate_subcase: None,
     }) {
         Sub::Run {
             allow_empty,
             serial,
-        } => run(cli.test.as_deref(), cli.lib.as_deref(), allow_empty, serial),
+            format,
+            isolate_test,
+            isolate_subcase,
+        } => run(RunCli {
+            test: cli.test,
+            lib: cli.lib,
+            debug: cli.debug,
+            max_thread: cli.max_thread,
+            allow_empty,
+            serial,
+            format,
+            isolate_test,
+            isolate_subcase,
+        }),
         Sub::Check { format } => check(cli.test.as_deref(), cli.lib.as_deref(), format),
     }
 }
 
-/// Runs the `check` subcommand (FR-X-03).
-///
-/// Exit codes follow FR-X-02: 0 when the configuration is clean, 2 for
-/// load-time findings, missing options, and unreadable files.
-fn check(test: Option<&Path>, lib: Option<&Path>, format: Format) -> std::process::ExitCode {
-    let (Some(test), Some(lib)) = (test, lib) else {
-        eprintln!("error: `check` requires both --test and --lib");
-        return std::process::ExitCode::from(exit_code::ExitCode::ConfigError as u8);
-    };
-    match run_check(lib, test) {
-        Ok(report) => {
-            match format {
-                Format::Text => print_check_text(&report),
-                Format::Json => println!("{}", report.to_json()),
-            }
-            let code = if report.ok() {
-                exit_code::ExitCode::Success
-            } else {
-                exit_code::ExitCode::ConfigError
-            };
-            std::process::ExitCode::from(code as u8)
-        }
-        // An unreadable file is an environment problem (exit 2), not a
-        // config finding, so the report is bypassed entirely.
-        Err(error @ CoreError::Io { .. }) => {
-            eprintln!("error: {error}");
-            std::process::ExitCode::from(exit_code::ExitCode::ConfigError as u8)
-        }
-        // CoreError is non_exhaustive; run_check promises Io only, so
-        // anything else is a framework bug (exit 3).
-        Err(error) => {
-            eprintln!("error: {error}");
-            std::process::ExitCode::from(exit_code::ExitCode::InternalError as u8)
-        }
-    }
+/// The `run` subcommand's full invocation, gathered from the global and
+/// subcommand options.
+struct RunCli {
+    test: Option<PathBuf>,
+    lib: Option<PathBuf>,
+    debug: Option<String>,
+    max_thread: Option<u64>,
+    allow_empty: bool,
+    serial: bool,
+    format: Format,
+    isolate_test: Option<String>,
+    isolate_subcase: Option<String>,
 }
 
 /// Runs the `run` subcommand (FR-X-01, the default).
 ///
 /// Load-time findings reuse the `check` gate (exit 2); library-load
-/// failures are environment errors (exit 2); executed cases map to 0 when
-/// nothing failed and 1 otherwise. A run that executes zero cases exits
-/// 1 unless `--allow-empty` is given (Q-08). `--serial` (FR-T-09) is
-/// forwarded to the executor, where it participates in the per-test
-/// serial precedence.
-fn run(
-    test: Option<&Path>,
-    lib: Option<&Path>,
-    allow_empty: bool,
-    serial: bool,
-) -> std::process::ExitCode {
-    let (Some(test), Some(lib)) = (test, lib) else {
+/// failures, unreadable files, and an unknown `-d` name are environment
+/// or user errors (exit 2); executed cases map to 0 when nothing failed
+/// and 1 otherwise. A run that executes zero cases exits 1 unless
+/// `--allow-empty` is given (Q-08). `--serial` (FR-T-09) and `-m`
+/// (FR-T-04) are forwarded to the executor. A death-test child (the
+/// hidden `--isolate-*` flags, FR-T-05) runs exactly one sub-case and
+/// reports to stderr so the parent's stdout stays clean.
+fn run(invocation: RunCli) -> std::process::ExitCode {
+    let (Some(test), Some(lib)) = (invocation.test.as_deref(), invocation.lib.as_deref()) else {
         eprintln!("error: `run` requires both --test and --lib");
         return std::process::ExitCode::from(exit_code::ExitCode::ConfigError as u8);
     };
-    let reporter = ConsoleReporter::new(std::io::stdout());
-    let options = RunOptions { serial };
-    match ccaller_core::execute(lib, test, options, Box::new(reporter)) {
+
+    // The hidden isolation flags are a pair: one without the other is a
+    // broken launcher, not something a user should ever type.
+    let isolate = match (invocation.isolate_test, invocation.isolate_subcase) {
+        (None, None) => None,
+        (Some(test), Some(subcase)) => Some(IsolationTarget { test, subcase }),
+        _ => {
+            eprintln!("error: --isolate-test and --isolate-subcase must be given together");
+            return std::process::ExitCode::from(exit_code::ExitCode::ConfigError as u8);
+        }
+    };
+    let child_mode = isolate.is_some();
+
+    let options = RunOptions {
+        serial: invocation.serial,
+        max_threads: invocation
+            .max_thread
+            .and_then(|threads| usize::try_from(threads).ok()),
+        debug: invocation.debug,
+        isolate,
+        // Death-test children never spawn grandchildren; every other
+        // run isolates through the re-execution launcher (FR-T-05).
+        death: if child_mode {
+            DeathIsolation::Skip
+        } else {
+            DeathIsolation::Child(Box::new(death::Relaunch))
+        },
+        ..RunOptions::default()
+    };
+
+    // A death-test child reports to stderr: its report is debugging
+    // context for the parent, and the parent owns stdout (FR-R-01).
+    let reporter: Box<dyn ccaller_core::Reporter> = match invocation.format {
+        Format::Text if child_mode => Box::new(ConsoleReporter::new(std::io::stderr())),
+        Format::Text => Box::new(ConsoleReporter::new(std::io::stdout())),
+        Format::Json => Box::new(JsonReporter::new(std::io::stdout())),
+        Format::Junit => Box::new(JunitReporter::new(std::io::stdout())),
+    };
+
+    match ccaller_core::execute(lib, test, options, reporter) {
         Ok(report) => {
             let code = if report.summary.total == 0 {
-                if allow_empty {
+                if invocation.allow_empty {
                     exit_code::ExitCode::Success
                 } else {
                     exit_code::ExitCode::TestFailed
@@ -191,6 +246,10 @@ fn run(
         }
         Err(RunError::Config(diagnostics)) => {
             print_config_findings(&diagnostics);
+            std::process::ExitCode::from(exit_code::ExitCode::ConfigError as u8)
+        }
+        Err(RunError::TestNotFound(name)) => {
+            eprintln!("error: no test or sub-case named `{name}` exists");
             std::process::ExitCode::from(exit_code::ExitCode::ConfigError as u8)
         }
         Err(RunError::Load(error)) => {
@@ -214,18 +273,46 @@ fn run(
     }
 }
 
-/// Prints load-time findings to stderr (run has no result to report, so
-/// the diagnostics are errors, not check's stdout findings).
-fn print_config_findings(diagnostics: &[ccaller_core::config::Diagnostic]) {
-    for diagnostic in diagnostics {
-        eprintln!(
-            "{}:{}:{}: error[{}]: {}",
-            diagnostic.location.file,
-            diagnostic.location.line,
-            diagnostic.location.column,
-            diagnostic.code,
-            diagnostic.message
-        );
+/// Runs the `check` subcommand (FR-X-03).
+///
+/// Exit codes follow FR-X-02: 0 when the configuration is clean, 2 for
+/// load-time findings, missing options, and unreadable files.
+fn check(test: Option<&Path>, lib: Option<&Path>, format: Format) -> std::process::ExitCode {
+    let (Some(test), Some(lib)) = (test, lib) else {
+        eprintln!("error: `check` requires both --test and --lib");
+        return std::process::ExitCode::from(exit_code::ExitCode::ConfigError as u8);
+    };
+    match run_check(lib, test) {
+        Ok(report) => {
+            match format {
+                Format::Text => print_check_text(&report),
+                Format::Json => println!("{}", report.to_json()),
+                // check validates a configuration; it executes nothing,
+                // so there is no case data to fill a JUnit document with.
+                Format::Junit => {
+                    eprintln!("error: `check` supports --format text|json");
+                    return std::process::ExitCode::from(exit_code::ExitCode::ConfigError as u8);
+                }
+            }
+            let code = if report.ok() {
+                exit_code::ExitCode::Success
+            } else {
+                exit_code::ExitCode::ConfigError
+            };
+            std::process::ExitCode::from(code as u8)
+        }
+        // An unreadable file is an environment problem (exit 2), not a
+        // config finding, so the report is bypassed entirely.
+        Err(error @ CoreError::Io { .. }) => {
+            eprintln!("error: {error}");
+            std::process::ExitCode::from(exit_code::ExitCode::ConfigError as u8)
+        }
+        // CoreError is non_exhaustive; run_check promises Io only, so
+        // anything else is a framework bug (exit 3).
+        Err(error) => {
+            eprintln!("error: {error}");
+            std::process::ExitCode::from(exit_code::ExitCode::InternalError as u8)
+        }
     }
 }
 
@@ -252,5 +339,20 @@ fn print_check_text(report: &CheckReport) {
         );
     } else {
         println!("error: {} finding(s)", report.errors.len());
+    }
+}
+
+/// Prints load-time findings to stderr (run has no result to report, so
+/// the diagnostics are errors, not check's stdout findings).
+fn print_config_findings(diagnostics: &[ccaller_core::config::Diagnostic]) {
+    for diagnostic in diagnostics {
+        eprintln!(
+            "{}:{}:{}: error[{}]: {}",
+            diagnostic.location.file,
+            diagnostic.location.line,
+            diagnostic.location.column,
+            diagnostic.code,
+            diagnostic.message
+        );
     }
 }

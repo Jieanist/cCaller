@@ -65,3 +65,70 @@ pub extern "C" fn Call_fail(_page: *mut u64, _params: *const i64, _param_len: i6
 pub extern "C" fn Call_env_fail(_page: *mut u64, _params: *const i64, _param_len: i64) -> i64 {
     -1
 }
+
+/// Crashes the process: `std::process::abort` raises SIGABRT without a
+/// single line of unsafe code. The death-test child that runs this is
+/// killed by the signal, which is exactly what `should_panic` asserts.
+#[no_mangle]
+pub extern "C" fn Call_abort(_page: *mut u64, _params: *const i64, _param_len: i64) -> i64 {
+    std::process::abort()
+}
+
+/// Sleeps for a long time and then returns 0; a death-test child
+/// running this neither crashes nor completes in any sane budget, so
+/// the executor's timeout (and its kill) is what the parent observes.
+#[no_mangle]
+pub extern "C" fn Call_hang(_page: *mut u64, _params: *const i64, _param_len: i64) -> i64 {
+    std::thread::sleep(std::time::Duration::from_secs(30));
+    0
+}
+
+/// Tracks how many wrapper calls are in flight and the high-water mark
+/// of concurrent calls; `Call_concurrency_reset` clears both counters.
+static IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
+static MAX_IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
+
+/// Resets the concurrency counters and returns 0.
+#[no_mangle]
+pub extern "C" fn Call_concurrency_reset(
+    _page: *mut u64,
+    _params: *const i64,
+    _param_len: i64,
+) -> i64 {
+    IN_FLIGHT.store(0, Ordering::SeqCst);
+    MAX_IN_FLIGHT.store(0, Ordering::SeqCst);
+    0
+}
+
+/// Marks one call in flight, sleeps briefly so concurrent calls
+/// overlap, and returns the high-water mark observed so far.
+///
+/// With real threads the maximum grows with the number of overlapping
+/// calls, which is how the parallel scheduler is verified to actually
+/// run executions concurrently (FR-T-02/T-03) and to respect the `-m`
+/// cap (FR-T-04).
+#[no_mangle]
+pub extern "C" fn Call_concurrency(
+    _page: *mut u64,
+    _params: *const i64,
+    _param_len: i64,
+) -> i64 {
+    let now = IN_FLIGHT.fetch_add(1, Ordering::SeqCst) + 1;
+    // Publish the new high-water mark; a racing call may publish a
+    // smaller value afterwards, so use a compare-and-swap loop.
+    let mut seen = MAX_IN_FLIGHT.load(Ordering::SeqCst);
+    while now > seen {
+        match MAX_IN_FLIGHT.compare_exchange(
+            seen,
+            now,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        ) {
+            Ok(_) => break,
+            Err(actual) => seen = actual,
+        }
+    }
+    std::thread::sleep(std::time::Duration::from_millis(30));
+    IN_FLIGHT.fetch_sub(1, Ordering::SeqCst);
+    MAX_IN_FLIGHT.load(Ordering::SeqCst) as i64
+}

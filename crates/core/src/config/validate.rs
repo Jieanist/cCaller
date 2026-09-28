@@ -63,6 +63,7 @@ pub fn validate_cases(
 
     validate_envs(config, doc, libs, &test_sites, &mut out);
     validate_concurrences(config, doc, &test_sites, &mut out);
+    validate_debug_tests(config, doc, &test_sites, &mut out);
     validate_global_env(config.env.as_ref(), "global", doc, libs, &mut out);
     validate_global_env(config.thread_env.as_ref(), "thread", doc, libs, &mut out);
     validate_global_env(config.process_env.as_ref(), "process", doc, libs, &mut out);
@@ -168,6 +169,29 @@ fn validate_concurrences(
                     ),
                 ));
             }
+        }
+    }
+}
+
+/// Checks that every `debug_test` entry names a declared test (FR-T-08).
+///
+/// A stale debug name would otherwise select zero tests and turn the run
+/// into a confusing empty failure (decision Q-08); load time is where the
+/// configuration is checked, so the typo is reported there.
+fn validate_debug_tests(
+    config: &CaseConfig,
+    doc: &SourceDoc,
+    test_sites: &HashMap<&str, Location>,
+    out: &mut Vec<Diagnostic>,
+) {
+    for entry in &config.debug_test {
+        let name = entry.get_ref();
+        if !test_sites.contains_key(name.as_str()) {
+            out.push(Diagnostic::new(
+                codes::UNKNOWN_TEST_REF,
+                doc.locate(entry.span()),
+                format!("debug_test references unknown test `{name}`"),
+            ));
         }
     }
 }
@@ -637,6 +661,39 @@ cmds = [{ opfunc = "Call_ping", expect_eq = 0 }]
         );
         assert_eq!(codes_of(&diags), vec!["unknown_test_ref"]);
         assert!(diags[0].message.contains("concurrency group `cg`"));
+    }
+
+    #[test]
+    fn debug_test_unknown_name_is_reported__F_T_08() {
+        // A stale debug name would silently select zero tests; load time
+        // is where the typo is caught, with the entry's own location.
+        let diags = check(
+            r#"
+version = 1
+debug_test = ["ghost"]
+[[tests]]
+name = "t"
+cmds = [{ opfunc = "Call_ping", expect_eq = 0 }]
+"#,
+        );
+        assert_eq!(codes_of(&diags), vec!["unknown_test_ref"]);
+        assert!(diags[0].message.contains("debug_test"));
+        assert!(diags[0].message.contains("ghost"));
+        assert!(diags[0].location.line >= 1);
+    }
+
+    #[test]
+    fn debug_test_known_names_validate_clean__F_T_08() {
+        let diags = check(
+            r#"
+version = 1
+debug_test = ["t"]
+[[tests]]
+name = "t"
+cmds = [{ opfunc = "Call_ping", expect_eq = 0 }]
+"#,
+        );
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
     }
 
     #[test]
