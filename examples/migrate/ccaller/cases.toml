@@ -5,8 +5,9 @@
 #   - debug_test 单名 → 列表
 #   - expect_eq "!0" → expect_ne = 0
 #   - inputs 组名显式化（hitest 的 default1 → ipt1）
-#   - 组级 break_if_fail=false / should_panic=true 在 cCaller 暂无对应，
-#     故本样例不携带（migrate 应就此提示；M4 计划补“组级覆盖”）
+#   - 组级 break_if_fail=false / should_panic=true 可直接映射到 cCaller 的
+#     InputGroup 组级覆盖（M4 已落地）；本样例为保持 run 绿而省略
+#     （should_panic=true 需要崩溃 wrapper，libc_wrapper 不崩溃）
 
 version = 1
 

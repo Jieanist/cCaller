@@ -92,7 +92,7 @@ hitest 风格配置如何机械地翻译成 cCaller 配置，以及哪些地方�
 | `name` 可省略（自动 `default1/default2…`） | `name` **必填** |
 | `refs`（shared_inputs 复用） | 同 |
 | `args`：`Single(String)` / `List([String])` / `Range{start:i32, end:i32, step:Option<i32>}`（step 缺省 1） | `args`：`Single(Int\|Str)` / `List` / `Range{start, end, step}`（step **必填**且 >0，闭区间） |
-| 组级 `should_panic` / `break_if_fail`（覆盖 Test 级） | **无**（M4 计划补“组级覆盖”）→ 迁移需提示 |
+| 组级 `should_panic` / `break_if_fail`（覆盖 Test 级） | InputGroup 组级覆盖（M4 已落地） | 直接映射 |
 | `$var` 用在 cmd args/expect | 同；且 own-args 值可 `$var` 引用**单值** shared 参数（FR-C-06） |
 
 **子用例命名**：hitest 未严格规定；cCaller 用 Q-05 `{test}/{group}#{index}[k=v,…]`
@@ -110,7 +110,7 @@ hitest 风格配置如何机械地翻译成 cCaller 配置，以及哪些地方�
 2. **自定义失败码**：hitest 可返回任意负值；cCaller 要求收敛到 `[-127,-1]`。
 3. **InputGroup 缺省名**：`default1/default2…` 需生成稳定的显式名（cCaller `name` 必填）。
 4. **Range step**：hitest 缺省 → 显式 `step = 1`。
-5. **组级 `should_panic` / `break_if_fail`**：cCaller 暂无对应，需提示或等待 M4 组级覆盖。
+5. **组级 `should_panic` / `break_if_fail`**：M4 已落地 InputGroup 组级覆盖，直接映射。
 6. **`ref_inputs`**：hitest 专有，cCaller 用 env 层替代。
 7. **`debug_test`**：单名 → 列表。
 8. **`params` 有符号化**：wrapper 侧改动，配置侧无感知，但需提醒重编。
