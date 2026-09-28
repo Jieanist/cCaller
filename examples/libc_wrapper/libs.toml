@@ -1,0 +1,51 @@
+# libs.toml - library description for the libc wrapper.
+#
+# Declares the dynamic library under test and every `Call_<name>` symbol it
+# exports. `slot_roles` marks which parameters carry a param_page slot index
+# and whether the wrapper reads / writes / read-writes that slot, so the
+# framework's static def-use analysis can reject "read before write" and
+# out-of-range indices at load time (FR-C-10).
+
+version = 1
+
+[[libs]]
+path = "libc_wrapper.so"
+
+funcs = [
+  # ---- memory management ----
+  { name = "Call_malloc", paras = ["len", "mem_idx"], slot_roles = { mem_idx = "write" } },
+  { name = "Call_free",   paras = ["mem_idx"],        slot_roles = { mem_idx = "read" } },
+
+  # ---- memory operations ----
+  { name = "Call_memcpy", paras = ["dst_idx", "src_idx", "len"],
+    slot_roles = { dst_idx = "read", src_idx = "read" } },
+  { name = "Call_memset", paras = ["dst_idx", "val", "len"],
+    slot_roles = { dst_idx = "read" } },
+  { name = "Call_memcmp", paras = ["dst_idx", "dst_off", "src_idx", "src_off", "len"],
+    slot_roles = { dst_idx = "read", src_idx = "read" } },
+
+  # ---- data access (read / write 8 / 16 / 32 / 64) ----
+  { name = "Call_read8",  paras = ["addr_idx", "off"], slot_roles = { addr_idx = "read" } },
+  { name = "Call_read16", paras = ["addr_idx", "off"], slot_roles = { addr_idx = "read" } },
+  { name = "Call_read32", paras = ["addr_idx", "off"], slot_roles = { addr_idx = "read" } },
+  { name = "Call_read64", paras = ["addr_idx", "off"], slot_roles = { addr_idx = "read" } },
+  { name = "Call_write8",  paras = ["addr_idx", "off", "val"], slot_roles = { addr_idx = "read" } },
+  { name = "Call_write16", paras = ["addr_idx", "off", "val"], slot_roles = { addr_idx = "read" } },
+  { name = "Call_write32", paras = ["addr_idx", "off", "val"], slot_roles = { addr_idx = "read" } },
+  { name = "Call_write64", paras = ["addr_idx", "off", "val"], slot_roles = { addr_idx = "read" } },
+
+  # ---- strings & arithmetic (no slot access) ----
+  { name = "Call_strlen", paras = ["str"] },
+  { name = "Call_atoi",   paras = ["str"] },
+  { name = "Call_strcmp", paras = ["str1", "str2"] },
+  { name = "Call_strncpy", paras = ["dst_idx", "str", "len"], slot_roles = { dst_idx = "read" } },
+  { name = "Call_add",    paras = ["a", "b"] },
+
+  # ---- slot helpers (exercise read / write / read_write) ----
+  { name = "Call_store",     paras = ["slot_idx", "val"],   slot_roles = { slot_idx = "write" } },
+  { name = "Call_fetch_add", paras = ["slot_idx", "delta"], slot_roles = { slot_idx = "read_write" } },
+
+  # ---- lifecycle / death-test helpers ----
+  { name = "Call_skip",  paras = [] },
+  { name = "Call_abort", paras = [] },
+]

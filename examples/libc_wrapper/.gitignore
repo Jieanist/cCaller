@@ -1,0 +1,2 @@
+# Build artifacts (the compiled wrapper is reproducible via build.sh).
+*.so

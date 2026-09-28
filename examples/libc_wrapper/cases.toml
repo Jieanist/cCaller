@@ -1,0 +1,203 @@
+# cases.toml - end-to-end test cases for the libc wrapper.
+#
+# Covers the cCaller configuration surface used by the M3 acceptance suite:
+# sequential read/write, parameterized inputs (shared_inputs / refs / lists /
+# ranges), eq/ne/ge assertions, thread_num > 1, should_panic, perf, and the
+# four env layers (process / global / case / thread) plus concurrences.
+
+version = 1
+default_serial = false
+
+# ---- shared parameter groups (reused via `refs`) ----
+[shared_inputs.common]
+byte = [17, 34, 51]   # 0x11, 0x22, 0x33
+
+# ---- run-level env: process (entered once, before every test) ----
+[process_env]
+name = "proc"
+init = [{ opfunc = "Call_malloc", args = ["len=128", "mem_idx=100"] }]
+exit = [{ opfunc = "Call_free",   args = ["mem_idx=100"] }]
+
+# ---- run-level env: global (entered once, before every test) ----
+[env]
+name = "global"
+init = [{ opfunc = "Call_store", args = ["slot_idx=101", "val=0xCAFE"] }]
+exit = []
+
+# ---- test-level env: thread (entered once per test) ----
+[thread_env]
+name = "thread"
+init = [{ opfunc = "Call_store", args = ["slot_idx=102", "val=1"] }]
+exit = []
+
+# ---- case-level env: owns the test it references ----
+[[envs]]
+name = "with_buffer"
+init = [{ opfunc = "Call_malloc", args = ["len=32", "mem_idx=103"] }]
+exit = [{ opfunc = "Call_free",   args = ["mem_idx=103"] }]
+tests = ["t_env_case"]
+
+# =====================================================================
+# Tests
+# =====================================================================
+
+# Sequential malloc -> free (write slot, then read slot).
+[[tests]]
+name = "t_malloc_free"
+cmds = [
+  { opfunc = "Call_malloc", expect_eq = 0, args = ["len=256", "mem_idx=1"] },
+  { opfunc = "Call_free",   expect_eq = 0, args = ["mem_idx=1"] },
+]
+
+# Sequential write/read round-trip for every width 8/16/32/64.
+[[tests]]
+name = "t_rw_roundtrip"
+cmds = [
+  { opfunc = "Call_malloc",  expect_eq = 0, args = ["len=64", "mem_idx=2"] },
+  { opfunc = "Call_write8",  expect_eq = 0, args = ["addr_idx=2", "off=0", "val=0x5A"] },
+  { opfunc = "Call_read8",   expect_eq = "0x5A", args = ["addr_idx=2", "off=0"] },
+  { opfunc = "Call_write16", expect_eq = 0, args = ["addr_idx=2", "off=2", "val=0x1234"] },
+  { opfunc = "Call_read16",  expect_eq = "0x1234", args = ["addr_idx=2", "off=2"] },
+  { opfunc = "Call_write32", expect_eq = 0, args = ["addr_idx=2", "off=4", "val=0xDEADBEEF"] },
+  { opfunc = "Call_read32",  expect_eq = "0xDEADBEEF", args = ["addr_idx=2", "off=4"] },
+  { opfunc = "Call_write64", expect_eq = 0, args = ["addr_idx=2", "off=8", "val=0x1122334455667788"] },
+  { opfunc = "Call_read64",  expect_eq = "0x1122334455667788", args = ["addr_idx=2", "off=8"] },
+  { opfunc = "Call_free",    expect_eq = 0, args = ["mem_idx=2"] },
+]
+
+# memset -> memcpy -> memcmp (equal buffers).
+[[tests]]
+name = "t_mem_ops"
+cmds = [
+  { opfunc = "Call_malloc", expect_eq = 0, args = ["len=64", "mem_idx=3"] },
+  { opfunc = "Call_malloc", expect_eq = 0, args = ["len=64", "mem_idx=4"] },
+  { opfunc = "Call_memset", expect_eq = 0, args = ["dst_idx=3", "val=0xAB", "len=8"] },
+  { opfunc = "Call_memcpy", expect_eq = 0, args = ["dst_idx=4", "src_idx=3", "len=8"] },
+  { opfunc = "Call_memcmp", expect_eq = 0, args = ["dst_idx=3", "dst_off=0", "src_idx=4", "src_off=0", "len=8"] },
+  { opfunc = "Call_read8",  expect_eq = "0xAB", args = ["addr_idx=4", "off=0"] },
+  { opfunc = "Call_free",   expect_eq = 0, args = ["mem_idx=3"] },
+  { opfunc = "Call_free",   expect_eq = 0, args = ["mem_idx=4"] },
+]
+
+# memcmp on differing buffers (expect_ne).
+[[tests]]
+name = "t_memcmp_ne"
+cmds = [
+  { opfunc = "Call_malloc", expect_eq = 0, args = ["len=8", "mem_idx=6"] },
+  { opfunc = "Call_malloc", expect_eq = 0, args = ["len=8", "mem_idx=7"] },
+  { opfunc = "Call_memset", expect_eq = 0, args = ["dst_idx=6", "val=0x11", "len=8"] },
+  { opfunc = "Call_memset", expect_eq = 0, args = ["dst_idx=7", "val=0x22", "len=8"] },
+  { opfunc = "Call_memcmp", expect_ne = 0, args = ["dst_idx=6", "dst_off=0", "src_idx=7", "src_off=0", "len=8"] },
+  { opfunc = "Call_free",   expect_eq = 0, args = ["mem_idx=6"] },
+  { opfunc = "Call_free",   expect_eq = 0, args = ["mem_idx=7"] },
+]
+
+# Strings: strlen / atoi / strcmp / strncpy, then read the copied bytes back.
+[[tests]]
+name = "t_strings"
+cmds = [
+  { opfunc = "Call_strlen",  expect_eq = 5, args = ["str='hello'"] },
+  { opfunc = "Call_atoi",    expect_eq = 42, args = ["str='42'"] },
+  { opfunc = "Call_strcmp",  expect_eq = 0, args = ["str1='abc'", "str2='abc'"] },
+  { opfunc = "Call_strcmp",  expect_ne = 0, args = ["str1='abc'", "str2='abd'"] },
+  { opfunc = "Call_malloc",  expect_eq = 0, args = ["len=16", "mem_idx=5"] },
+  { opfunc = "Call_strncpy", expect_eq = 0, args = ["dst_idx=5", "str='hello'", "len=6"] },
+  { opfunc = "Call_read8",   expect_eq = "0x68", args = ["addr_idx=5", "off=0"] }, # 'h'
+  { opfunc = "Call_read8",   expect_eq = "0x6F", args = ["addr_idx=5", "off=4"] }, # 'o'
+  { opfunc = "Call_free",    expect_eq = 0, args = ["mem_idx=5"] },
+]
+
+# Parameterized via shared_inputs + refs: 3 subcases (byte in {17,34,51}).
+[[tests]]
+name = "t_write_read_param"
+cmds = [
+  { opfunc = "Call_malloc", expect_eq = 0, args = ["len=16", "mem_idx=10"] },
+  { opfunc = "Call_write8", expect_eq = 0, args = ["addr_idx=10", "off=0", "val=$byte"] },
+  { opfunc = "Call_read8",  expect_eq = "$byte", args = ["addr_idx=10", "off=0"] },
+  { opfunc = "Call_free",   expect_eq = 0, args = ["mem_idx=10"] },
+]
+[[tests.inputs]]
+name = "ipt"
+refs = ["common"]
+
+# Parameterized via a closed range: 3 subcases (off in {0,4,8}).
+[[tests]]
+name = "t_write_read_range"
+cmds = [
+  { opfunc = "Call_malloc",  expect_eq = 0, args = ["len=64", "mem_idx=11"] },
+  { opfunc = "Call_write16", expect_eq = 0, args = ["addr_idx=11", "off=$off", "val=0x5AA5"] },
+  { opfunc = "Call_read16",  expect_eq = "0x5AA5", args = ["addr_idx=11", "off=$off"] },
+  { opfunc = "Call_free",    expect_eq = 0, args = ["mem_idx=11"] },
+]
+[[tests.inputs]]
+name = "ipt"
+args = { off = { start = 0, end = 8, step = 4 } }
+
+# eq / ne / ge assertions on pure arithmetic and string functions.
+[[tests]]
+name = "t_assertions"
+cmds = [
+  { opfunc = "Call_add",    expect_ge = 10, args = ["a=7", "b=5"] },
+  { opfunc = "Call_add",    expect_ne = 0,  args = ["a=1", "b=2"] },
+  { opfunc = "Call_atoi",   expect_eq = 100, args = ["str='100'"] },
+  { opfunc = "Call_strlen", expect_ge = 3,  args = ["str='abcd'"] },
+]
+
+# thread_num > 1 plus a read_write slot (fetch_add); perf is a no-op today.
+[[tests]]
+name = "t_threaded_counter"
+thread_num = 4
+cmds = [
+  { opfunc = "Call_store",     expect_eq = 0, args = ["slot_idx=20", "val=0"] },
+  { opfunc = "Call_fetch_add", expect_eq = 0, args = ["slot_idx=20", "delta=1"], perf = true },
+  { opfunc = "Call_fetch_add", expect_eq = 1, args = ["slot_idx=20", "delta=1"] },
+  { opfunc = "Call_fetch_add", expect_eq = 2, args = ["slot_idx=20", "delta=1"] },
+]
+
+# Death test: the M2 executor skips should_panic tests wholesale; M3 will
+# isolate them in a subprocess and observe the abort as the expected death.
+[[tests]]
+name = "t_death_abort"
+should_panic = true
+cmds = [
+  { opfunc = "Call_abort", expect_eq = 0, args = [] },
+]
+
+# Reads the buffer written by the process env init (slot 100).
+[[tests]]
+name = "t_process_env_slot"
+cmds = [
+  { opfunc = "Call_write32", expect_eq = 0, args = ["addr_idx=100", "off=0", "val=0xCAFEBABE"] },
+  { opfunc = "Call_read32",  expect_eq = "0xCAFEBABE", args = ["addr_idx=100", "off=0"] },
+]
+
+# Owned by the `with_buffer` case env: uses its slot 103 buffer.
+[[tests]]
+name = "t_env_case"
+cmds = [
+  { opfunc = "Call_write32", expect_eq = 0, args = ["addr_idx=103", "off=0", "val=0x11223344"] },
+  { opfunc = "Call_read32",  expect_eq = "0x11223344", args = ["addr_idx=103", "off=0"] },
+]
+
+# Reads the values the global (101) and thread (102) env inits stored.
+[[tests]]
+name = "t_env_layers"
+cmds = [
+  { opfunc = "Call_fetch_add", expect_eq = "0xCAFE", args = ["slot_idx=101", "delta=0"] },
+  { opfunc = "Call_fetch_add", expect_eq = 1, args = ["slot_idx=102", "delta=0"] },
+]
+
+# A skipped Cmd is not a failure: the second Cmd still runs and passes.
+[[tests]]
+name = "t_skip"
+cmds = [
+  { opfunc = "Call_skip", expect_eq = 0, args = [] },
+  { opfunc = "Call_add",  expect_eq = 5, args = ["a=2", "b=3"] },
+]
+
+# =====================================================================
+# Concurrency groups (references are validated; execution lands in M3)
+# =====================================================================
+[[concurrences]]
+name = "parallel_mem"
+tests = ["t_rw_roundtrip", "t_mem_ops"]
