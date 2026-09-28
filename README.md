@@ -3,9 +3,9 @@
 通用 C 接口测试执行框架：用 TOML 描述被测动态库与测试用例，框架负责加载期校验、
 输入展开、静态槽位 def-use 分析与执行调度。
 
-> **当前状态**：里程碑 M2 —— 配置模型、`ccaller check` 与 `ccaller run`
-> （串行执行 + 四层 env + 控制台摘要 + 退出码契约）已可用。
-> 并发执行、死亡测试、JSON/JUnit 报告等随后续里程碑落地。
+> **当前状态**：里程碑 M3 —— 并发执行、死亡测试隔离、perf 计时、debug 过滤
+> 与 JSON/JUnit 报告已落地（`ccaller run` 默认并发）。
+> `expand`/`gen`/`init`/`fmt`/`migrate` 等其余子命令随后续里程碑落地。
 
 ## 构建
 
@@ -78,6 +78,8 @@ ccaller --test cases.toml --lib libs.toml check --format json
 | `-t, --test <FILE>` | 用例配置文件；兼容别名 `--test_case` |
 | `-i, --lib <FILE>` | 库描述文件；兼容别名 `--input` |
 | `-l, --log <LEVEL>` | 日志级别：1-4（error/warn/info/debug）或级别名；`RUST_LOG` 优先 |
+| `-d, --debug <NAME>` | 仅执行名称匹配的测试；可重复（优先级低于配置 `debug_test` 与隔离） |
+| `-m, --max-thread <N>` | 并发 worker 上限（≥1）；受用例 `thread_num`/`concurrences` 约束 |
 | `-h, --help` | 打印帮助 |
 | `-V, --version` | 打印版本 |
 
@@ -85,7 +87,7 @@ ccaller --test cases.toml --lib libs.toml check --format json
 
 | 子命令 | 说明 |
 |---|---|
-| `run`（默认） | 执行配置：串行跑每个子用例，四层 env，控制台摘要；`--allow-empty` 允许 0 用例退出 0 |
+| `run`（默认） | 并发执行子用例（`thread_num`/`concurrences`/`-m` 控并发），四层 env，死亡测试子进程隔离，控制台摘要；`--format text\|json\|junit`；`--allow-empty` 允许 0 用例退出 0 |
 | `check` | 加载期校验 + 静态槽位 def-use 分析 + 展开数量统计，不执行；`--format text\|json`（默认 `text`） |
 
 执行（不写子命令即默认 `run`）：
@@ -102,7 +104,7 @@ ccaller --test cases.toml --lib libs.toml
 |---|---|
 | 0 | 全部通过（允许存在 skipped） |
 | 1 | 存在用例失败（断言失败、env 失败）；0 用例执行且未加 `--allow-empty` |
-| 2 | 配置/环境错误：加载期校验失败、库加载失败、用法错误、文件不可读 |
+| 2 | 配置/环境错误：加载期校验失败、库加载失败、用法错误、文件不可读、debug 过滤未命中 |
 | 3 | 框架内部错误（bug） |
 
 ## 配置格式

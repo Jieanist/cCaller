@@ -6,6 +6,28 @@
 
 ## [Unreleased]
 
+### M3：并发执行、死亡测试与机器报告
+
+#### 新增
+
+- 并发执行：`thread_num`/`concurrences`/`-m/--max-thread` 接入执行器；
+  worker 分块调度、worker-0 页回收、per-worker env 入栈/逆序出栈，
+  serial 测试整体串行（FR-T-08~T-10）。
+- 死亡测试隔离：`should_panic` 经子进程重执行隔离（避免 fork-in-threads），
+  轮询 + 超时击杀，崩溃=通过、正常返回=失败（FR-T-05）。
+- perf 计时：`perf` 命令耗时统计入报告（FR-P-01）。
+- debug 过滤：CLI `-d/--debug` 与配置 `debug_test`，优先级
+  isolate > debug_test > CLI -d；过滤时禁用 concurrence 组。
+- 报告：`Console`/`Json`/`Junit` 三种 Reporter；`RunReport{summary,cases,perf}`
+  + `to_json()`（schema=1）；`run --format text|json|junit`。
+- CLI：`-d/--debug`、`-m/--max-thread`、`run --format`、隐藏
+  `--isolate-test`/`--isolate-subcase`（成对校验）、debug 未命中 exit 2。
+
+#### 修复
+
+- `-i libs.toml` 裸相对名时 `parent()` 为空，导致 dlopen 走系统库搜索而非
+  描述文件目录；base 归一化为 `.`，路径恒带斜杠。
+
 ### M2：串行执行（`run` 子命令）
 
 #### 新增
